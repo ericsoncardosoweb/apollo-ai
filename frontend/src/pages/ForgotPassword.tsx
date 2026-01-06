@@ -1,9 +1,8 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import {
     TextInput,
-    PasswordInput,
     Button,
     Paper,
     Title,
@@ -13,21 +12,18 @@ import {
     Center,
     ThemeIcon,
     Alert,
-    Group,
     Anchor,
     Box,
-    Divider,
 } from '@mantine/core'
-import { IconAlertCircle, IconRocket } from '@tabler/icons-react'
+import { IconAlertCircle, IconMail, IconCheck } from '@tabler/icons-react'
 
-export default function Login() {
+export default function ForgotPassword() {
     const [email, setEmail] = useState('')
-    const [password, setPassword] = useState('')
     const [error, setError] = useState('')
+    const [success, setSuccess] = useState(false)
     const [loading, setLoading] = useState(false)
 
-    const { signIn, role } = useAuth()
-    const navigate = useNavigate()
+    const { resetPassword } = useAuth()
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -35,16 +31,48 @@ export default function Login() {
         setLoading(true)
 
         try {
-            await signIn(email, password)
-            // Redirect based on role will happen in App.tsx route guards
-            // For now, redirect to role-appropriate dashboard
-            navigate('/app')
+            await resetPassword(email)
+            setSuccess(true)
         } catch (err: unknown) {
-            const errorMessage = err instanceof Error ? err.message : 'Credenciais inválidas'
+            const errorMessage = err instanceof Error ? err.message : 'Erro ao enviar email'
             setError(errorMessage)
         } finally {
             setLoading(false)
         }
+    }
+
+    if (success) {
+        return (
+            <Box
+                style={{
+                    minHeight: '100vh',
+                    background: 'linear-gradient(135deg, var(--mantine-color-dark-8) 0%, var(--mantine-color-dark-9) 100%)',
+                }}
+            >
+                <Container size={420} py={80}>
+                    <Center>
+                        <Stack align="center" gap="md">
+                            <ThemeIcon size={80} radius="xl" color="green">
+                                <IconCheck size={40} />
+                            </ThemeIcon>
+                            <Title order={2} ta="center">Email Enviado!</Title>
+                            <Text c="dimmed" ta="center" maw={300}>
+                                Se existe uma conta com o email <strong>{email}</strong>,
+                                você receberá instruções para redefinir sua senha.
+                            </Text>
+                            <Button
+                                variant="light"
+                                component={Link}
+                                to="/login"
+                                mt="md"
+                            >
+                                Voltar para Login
+                            </Button>
+                        </Stack>
+                    </Center>
+                </Container>
+            </Box>
+        )
     }
 
     return (
@@ -58,18 +86,18 @@ export default function Login() {
                 <Center mb={30}>
                     <Stack align="center" gap="xs">
                         <ThemeIcon
-                            size={80}
+                            size={60}
                             radius="xl"
-                            variant="gradient"
-                            gradient={{ from: 'indigo', to: 'violet', deg: 135 }}
+                            variant="light"
+                            color="indigo"
                         >
-                            <IconRocket size={40} stroke={1.5} />
+                            <IconMail size={30} stroke={1.5} />
                         </ThemeIcon>
-                        <Title order={1} ta="center" mt="md">
-                            Apollo A.I.
+                        <Title order={2} ta="center" mt="md">
+                            Esqueceu a senha?
                         </Title>
-                        <Text c="dimmed" size="sm" ta="center">
-                            Plataforma de Agentes Inteligentes
+                        <Text c="dimmed" size="sm" ta="center" maw={300}>
+                            Digite seu email e enviaremos instruções para redefinir sua senha
                         </Text>
                     </Stack>
                 </Center>
@@ -95,53 +123,26 @@ export default function Login() {
                                 onChange={(e) => setEmail(e.target.value)}
                                 required
                                 disabled={loading}
-                                size="md"
                             />
-
-                            <PasswordInput
-                                label="Senha"
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                required
-                                disabled={loading}
-                                size="md"
-                            />
-
-                            <Group justify="flex-end">
-                                <Anchor component={Link} to="/forgot-password" size="sm" c="dimmed">
-                                    Esqueceu a senha?
-                                </Anchor>
-                            </Group>
 
                             <Button
                                 type="submit"
                                 fullWidth
                                 loading={loading}
-                                size="md"
                                 variant="gradient"
                                 gradient={{ from: 'indigo', to: 'violet' }}
                             >
-                                Entrar
+                                Enviar Instruções
                             </Button>
                         </Stack>
                     </form>
-
-                    <Divider label="ou" labelPosition="center" my="lg" />
-
-                    <Button
-                        component={Link}
-                        to="/register"
-                        fullWidth
-                        variant="outline"
-                        size="md"
-                    >
-                        Criar nova conta
-                    </Button>
                 </Paper>
 
-                <Text c="dimmed" size="xs" ta="center" mt={30}>
-                    © 2026 Apollo A.I. Advanced. Todos os direitos reservados.
+                <Text ta="center" mt="md" size="sm" c="dimmed">
+                    Lembrou a senha?{' '}
+                    <Anchor component={Link} to="/login" size="sm">
+                        Voltar para login
+                    </Anchor>
                 </Text>
             </Container>
         </Box>
