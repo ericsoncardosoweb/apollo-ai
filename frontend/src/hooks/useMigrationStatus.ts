@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { notifications } from '@mantine/notifications'
 
 // Current expected migration version - increment when adding new migrations
-export const CURRENT_MIGRATION_VERSION = 2 // CRM Engine V2
+export const CURRENT_MIGRATION_VERSION = 4 // Campaigns + Connections + Contacts
 
 interface TenantWithMigration {
     tenant_id: string

@@ -21,6 +21,9 @@ import {
     IconAdjustments,
     IconTestPipe,
     IconLock,
+    IconBrandWhatsapp,
+    IconMessage,
+    IconSend,
 } from '@tabler/icons-react'
 import { NavItem, UserRole } from '@/types'
 
@@ -111,10 +114,10 @@ export const adminNavItems: NavItem[] = [
         roles: ['master', 'admin', 'operator'],
     },
     {
-        label: 'Mensageria',
-        href: '/admin/messaging',
-        icon: IconWebhook,
-        description: 'Campanhas e broadcasts',
+        label: 'Campanhas',
+        href: '/admin/campaigns',
+        icon: IconSend,
+        description: 'Disparos em massa WhatsApp',
         roles: ['master', 'admin', 'operator'],
     },
     {
@@ -188,6 +191,20 @@ export const adminNavItems: NavItem[] = [
                 icon: IconSettings,
                 description: 'Configurações da empresa',
                 roles: ['master', 'admin'],
+            },
+            {
+                label: 'Conexões WhatsApp',
+                href: '/admin/connections',
+                icon: IconBrandWhatsapp,
+                description: 'Gerenciar instâncias',
+                roles: ['master', 'admin'],
+            },
+            {
+                label: 'Respostas Rápidas',
+                href: '/admin/quick-replies',
+                icon: IconMessage,
+                description: 'Templates de mensagem',
+                roles: ['master', 'admin', 'operator'],
             },
         ],
     },

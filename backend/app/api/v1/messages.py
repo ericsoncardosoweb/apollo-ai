@@ -224,3 +224,146 @@ async def delete_message(
     )
     
     logger.info("Message deleted", message_id=str(message_id))
+
+
+# ===========================================
+# Audio Transcription
+# ===========================================
+
+class TranscriptionRequest(BaseModel):
+    """Transcription request schema."""
+    audio_url: str
+    language: Optional[str] = "pt"
+    
+
+class TranscriptionResponse(BaseModel):
+    """Transcription response schema."""
+    text: str
+    duration_seconds: float
+    language: str
+    processing_time_ms: int
+
+
+@router.post("/transcribe", response_model=TranscriptionResponse)
+async def transcribe_audio(
+    request: TranscriptionRequest,
+    current_user: CurrentUser,
+    tenant: TenantContext
+):
+    """
+    Transcribe an audio message.
+    
+    Uses OpenAI Whisper for high-quality Portuguese transcription.
+    Supports formats: OGG, OPUS, MP3, WAV, M4A, WEBM
+    """
+    from app.services.audio_transcription import get_transcription_service
+    
+    service = get_transcription_service()
+    
+    try:
+        result = await service.transcribe_from_url(
+            audio_url=request.audio_url,
+            language=request.language,
+            prompt="Esta é uma mensagem de áudio do WhatsApp em português brasileiro."
+        )
+        
+        logger.info(
+            "Audio transcribed via API",
+            tenant_id=tenant["tenant_id"],
+            duration=result.duration_seconds
+        )
+        
+        return TranscriptionResponse(
+            text=result.text,
+            duration_seconds=result.duration_seconds,
+            language=result.language,
+            processing_time_ms=result.processing_time_ms
+        )
+        
+    except Exception as e:
+        logger.error("Transcription failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Transcription failed: {str(e)}"
+        )
+
+
+@router.patch("/{message_id}/transcription")
+async def update_message_transcription(
+    message_id: UUID,
+    current_user: CurrentUser,
+    tenant: TenantContext
+):
+    """
+    Transcribe and update an audio message with its text content.
+    
+    Fetches the audio from the message's media_url, transcribes it,
+    and updates the message with the transcription.
+    """
+    # Get message
+    message = await fetch_one("messages", {
+        "id": str(message_id),
+        "tenant_id": tenant["tenant_id"]
+    })
+    
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Message not found"
+        )
+    
+    if message.get("content_type") != "audio":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message is not an audio message"
+        )
+    
+    audio_url = message.get("media_url")
+    if not audio_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message has no audio URL"
+        )
+    
+    # Transcribe
+    from app.services.audio_transcription import get_transcription_service
+    service = get_transcription_service()
+    
+    try:
+        result = await service.transcribe_from_url(audio_url, language="pt")
+        
+        # Update message with transcription
+        from app.db.supabase import update_one
+        updated = await update_one(
+            "messages",
+            {"id": str(message_id)},
+            {
+                "content": result.text,
+                "ai_response_metadata": {
+                    "transcription": {
+                        "duration_seconds": result.duration_seconds,
+                        "language": result.language,
+                        "processing_time_ms": result.processing_time_ms
+                    }
+                }
+            }
+        )
+        
+        logger.info(
+            "Message transcription updated",
+            message_id=str(message_id),
+            duration=result.duration_seconds
+        )
+        
+        return {
+            "message": "Transcription completed",
+            "text": result.text,
+            "duration_seconds": result.duration_seconds
+        }
+        
+    except Exception as e:
+        logger.error("Message transcription failed", message_id=str(message_id), error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Transcription failed: {str(e)}"
+        )

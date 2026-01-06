@@ -4,7 +4,11 @@ Apollo A.I. Advanced - API v1 Router
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, tenants, agents, conversations, messages, crm, tools, webhooks, uploads, deals, pipelines, automations
+from app.api.v1 import (
+    auth, tenants, agents, conversations, messages, crm, tools, 
+    webhooks, uploads, deals, pipelines, automations, contacts, knowledge,
+    campaigns, templates
+)
 
 router = APIRouter()
 
@@ -18,6 +22,14 @@ router.include_router(crm.router, prefix="/crm", tags=["CRM"])
 router.include_router(tools.router, prefix="/tools", tags=["Tools"])
 router.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
 router.include_router(uploads.router)
+
+# Client Database - Contacts & Knowledge (uses tenant's Supabase)
+router.include_router(contacts.router)  # /contacts
+router.include_router(knowledge.router)  # /knowledge
+
+# Campaigns & Templates
+router.include_router(campaigns.router)  # /campaigns
+router.include_router(templates.router)  # /message-templates
 
 # CRM Engine V2
 router.include_router(deals.router)

@@ -34,6 +34,8 @@ import {
     Center,
     Tabs,
     Checkbox,
+    CopyButton,
+    Code,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
@@ -70,6 +72,8 @@ import {
     IconMail,
     IconBrandWhatsapp,
     IconWebhook,
+    IconCopy,
+    IconDatabase,
 } from '@tabler/icons-react'
 import { useViewContext } from '@/contexts/ViewContext'
 import { useClientDatabaseStatus, useClientSupabase } from '@/hooks/useClientSupabase'
@@ -151,6 +155,7 @@ export default function CRMBoard() {
     const [pipelines, setPipelines] = useState<Pipeline[]>([DEFAULT_PIPELINE])
     const [deals, setDeals] = useState<Deal[]>([])
     const [loading, setLoading] = useState(true)
+    const [needsSetup, setNeedsSetup] = useState(false)
 
     // UI State
     const [selectedPipeline, setSelectedPipeline] = useState<Pipeline | null>(null)
@@ -190,11 +195,19 @@ export default function CRMBoard() {
         setLoading(true)
         try {
             // Load pipelines
-            const { data: pipelineData } = await supabase
+            const { data: pipelineData, error: pipelineError } = await supabase
                 .from('crm_pipelines')
                 .select('*')
                 .eq('is_active', true)
                 .order('created_at')
+
+            // Check if table doesn't exist
+            if (pipelineError?.code === 'PGRST205') {
+                console.error('CRM tables not found:', pipelineError)
+                setNeedsSetup(true)
+                setLoading(false)
+                return
+            }
 
             if (pipelineData && pipelineData.length > 0) {
                 setPipelines(pipelineData)
@@ -206,17 +219,29 @@ export default function CRMBoard() {
             }
 
             // Load deals
-            const { data: dealData } = await supabase
+            const { data: dealData, error: dealError } = await supabase
                 .from('crm_deals')
                 .select('*')
                 .eq('status', 'open')
                 .order('created_at', { ascending: false })
 
+            if (dealError?.code === 'PGRST205') {
+                console.error('CRM deals table not found:', dealError)
+                setNeedsSetup(true)
+                setLoading(false)
+                return
+            }
+
             if (dealData) {
                 setDeals(dealData)
             }
-        } catch (error) {
+
+            setNeedsSetup(false)
+        } catch (error: any) {
             console.error('Error loading CRM data:', error)
+            if (error?.code === 'PGRST205') {
+                setNeedsSetup(true)
+            }
         } finally {
             setLoading(false)
         }
@@ -398,16 +423,24 @@ export default function CRMBoard() {
             return
         }
 
+        // Use form value or default to true if no pipelines exist
+        const shouldBeDefault = pipelineForm.is_default || pipelines.length === 0
+
         const pipelineData = {
             name: pipelineForm.name,
             description: pipelineForm.description || '',
             stages: pipelineForm.stages,
-            is_default: pipelines.length === 0 || (!isEditingPipeline && pipelines.every(p => !p.is_default)),
+            is_default: shouldBeDefault,
             is_active: true
         }
 
         if (supabase) {
             try {
+                // If marking as default, unset other defaults first
+                if (shouldBeDefault) {
+                    await supabase.from('crm_pipelines').update({ is_default: false }).eq('is_default', true)
+                }
+
                 if (isEditingPipeline && pipelineForm.id) {
                     const { error } = await supabase
                         .from('crm_pipelines')
@@ -560,6 +593,95 @@ export default function CRMBoard() {
                 <Title order={2}>CRM - Pipeline de Vendas</Title>
                 <Alert color="yellow" title="Banco de dados não configurado">
                     Configure o banco de dados do cliente para usar o CRM.
+                </Alert>
+            </Stack>
+        )
+    }
+
+    // SQL for CRM tables
+    const CRM_SQL = `-- Execute este SQL no Supabase do cliente para criar as tabelas do CRM
+
+CREATE TABLE IF NOT EXISTS crm_pipelines (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    stages JSONB NOT NULL DEFAULT '[]',
+    is_default BOOLEAN DEFAULT false,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO crm_pipelines (name, description, is_default, stages) 
+SELECT 'Funil de Vendas', 'Pipeline padrão', true,
+    '[{"id":"lead","name":"Lead","color":"#868e96","position":0},{"id":"qualificacao","name":"Qualificação","color":"#fab005","position":1},{"id":"proposta","name":"Proposta","color":"#228be6","position":2},{"id":"negociacao","name":"Negociação","color":"#7950f2","position":3},{"id":"fechamento","name":"Fechamento","color":"#40c057","position":4,"is_conversion_point":true}]'::jsonb
+WHERE NOT EXISTS (SELECT 1 FROM crm_pipelines);
+
+CREATE TABLE IF NOT EXISTS crm_deals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    contact_id UUID,
+    contact_name VARCHAR(255),
+    contact_phone VARCHAR(50),
+    pipeline_id UUID,
+    current_stage_id VARCHAR(100) NOT NULL DEFAULT 'lead',
+    value DECIMAL(12,2) DEFAULT 0,
+    cycle_number INT DEFAULT 1,
+    status VARCHAR(20) DEFAULT 'open',
+    assigned_user_id UUID,
+    assigned_user_name VARCHAR(255),
+    tags TEXT[] DEFAULT '{}',
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    closed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS crm_deal_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deal_id UUID NOT NULL,
+    from_stage VARCHAR(100),
+    to_stage VARCHAR(100) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE crm_pipelines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm_deals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm_deal_history ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "crm_pipelines_all" ON crm_pipelines FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "crm_deals_all" ON crm_deals FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "crm_deal_history_all" ON crm_deal_history FOR ALL USING (true) WITH CHECK (true);`
+
+    if (needsSetup) {
+        return (
+            <Stack gap="md">
+                <Title order={2}>CRM - Pipeline de Vendas</Title>
+                <Alert color="orange" title="Tabelas do CRM não encontradas" icon={<IconDatabase size={20} />}>
+                    <Stack gap="sm">
+                        <Text size="sm">
+                            As tabelas do CRM ainda não foram criadas no banco de dados deste cliente.
+                            Execute o SQL abaixo no Supabase do cliente para configurar.
+                        </Text>
+                        <Paper withBorder p="xs" style={{ maxHeight: 300, overflow: 'auto' }}>
+                            <Code block style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{CRM_SQL}</Code>
+                        </Paper>
+                        <Group>
+                            <CopyButton value={CRM_SQL}>
+                                {({ copied, copy }) => (
+                                    <Button
+                                        color={copied ? 'green' : 'blue'}
+                                        leftSection={copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                                        onClick={copy}
+                                    >
+                                        {copied ? 'SQL Copiado!' : 'Copiar SQL'}
+                                    </Button>
+                                )}
+                            </CopyButton>
+                            <Button variant="light" onClick={() => loadData()}>
+                                Verificar Novamente
+                            </Button>
+                        </Group>
+                    </Stack>
                 </Alert>
             </Stack>
         )
@@ -801,6 +923,14 @@ export default function CRMBoard() {
                 <Stack gap="md">
                     <TextInput label="Nome do Pipeline" placeholder="Ex: Funil de Vendas" required value={pipelineForm.name || ''} onChange={(e) => setPipelineForm({ ...pipelineForm, name: e.target.value })} />
                     <TextInput label="Descrição" placeholder="Descrição opcional" value={pipelineForm.description || ''} onChange={(e) => setPipelineForm({ ...pipelineForm, description: e.target.value })} />
+
+                    <Switch
+                        label="Pipeline Padrão"
+                        description="Este pipeline será usado como padrão para novos leads"
+                        checked={pipelineForm.is_default || false}
+                        onChange={(e) => setPipelineForm({ ...pipelineForm, is_default: e.currentTarget.checked })}
+                        color="green"
+                    />
 
                     <Divider label="Estágios" labelPosition="center" />
 

@@ -92,6 +92,77 @@ async def get_current_user(
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 
 
+async def get_current_tenant_id(current_user: CurrentUser) -> str:
+    """Extract tenant_id from current authenticated user."""
+    tenant_id = current_user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User not associated with any tenant"
+        )
+    return tenant_id
+
+
+async def get_tenant_supabase_client(current_user: CurrentUser):
+    """
+    Get a Supabase client for the current user's tenant.
+    
+    Fetches tenant credentials from Master DB and uses Connection Pool.
+    Credentials are decrypted if stored encrypted.
+    """
+    from app.core.tenant_connection import get_connection_pool
+    from app.core.security import decrypt_credential, is_encrypted
+    
+    tenant_id = current_user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User not associated with any tenant"
+        )
+    
+    # Get master client to fetch tenant config
+    master_client = get_supabase()
+    if not master_client:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Master database service not available"
+        )
+    
+    # Fetch tenant database config from master
+    result = master_client.table("tenant_database_config").select(
+        "supabase_url, supabase_anon_key, supabase_service_key"
+    ).eq("tenant_id", tenant_id).single().execute()
+    
+    if not result.data:
+        # Tenant not configured yet - fall back to master for now
+        logger.warning("Tenant database not configured, using master", tenant_id=tenant_id)
+        return master_client
+    
+    config = result.data
+    supabase_url = config.get("supabase_url")
+    supabase_key = config.get("supabase_service_key") or config.get("supabase_anon_key")
+    
+    if not supabase_url or not supabase_key:
+        logger.warning("Tenant database config incomplete", tenant_id=tenant_id)
+        return master_client
+    
+    # Decrypt credentials if encrypted
+    if is_encrypted(supabase_key):
+        supabase_key = decrypt_credential(supabase_key)
+    
+    # Get client from connection pool
+    pool = get_connection_pool()
+    try:
+        client = await pool.get_client(tenant_id, supabase_url, supabase_key)
+        return client
+    except Exception as e:
+        logger.error("Failed to connect to tenant database", tenant_id=tenant_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to connect to tenant database"
+        )
+
+
 # ===========================================
 # Tenant Context
 # ===========================================
@@ -128,6 +199,9 @@ async def get_tenant_context(current_user: CurrentUser) -> dict:
 
 
 TenantContext = Annotated[dict, Depends(get_tenant_context)]
+
+# Client Supabase - for accessing tenant's own database
+ClientSupabase = Annotated[Client, Depends(get_tenant_supabase_client)]
 
 
 # ===========================================
@@ -203,3 +277,14 @@ def require_permission(permission: str):
         return current_user
     
     return check_permission
+
+
+async def get_master_supabase():
+    """Get the master Supabase client (for super admin operations)."""
+    client = get_supabase()
+    if not client:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database service not available"
+        )
+    return client

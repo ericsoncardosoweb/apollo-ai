@@ -58,11 +58,26 @@ import {
     IconPackage,
     IconSettings,
     IconInfoCircle,
+    IconDatabase,
+    IconCopy,
+    IconCheck,
 } from '@tabler/icons-react'
 import { useViewContext } from '@/contexts/ViewContext'
 import { useClientDatabaseStatus } from '@/hooks/useClientSupabase'
-import { useConversations, useMessages, useSendMessage, useUpdateConversationMode } from '@/hooks/useConversations'
-import type { Message as ApiMessage } from '@/hooks/useConversations'
+import {
+    useChatConversations,
+    useChatMessages,
+    useSendChatMessage,
+    useTakeChatOver,
+    useMarkChatAsRead,
+    useResolveChatConversation,
+    useRealtimeChatConversations,
+    useRealtimeChatMessages,
+    useChatStats,
+    Conversation as ApiConversation,
+    ChatMessage as ApiMessage,
+} from '@/hooks/useChat'
+import { useAuth } from '@/contexts/AuthContext'
 
 // Types
 interface Contact {
@@ -79,7 +94,7 @@ interface Conversation {
     lastMessage: string
     lastMessageAt: string
     unreadCount: number
-    status: 'waiting' | 'ai' | 'attending' | 'resolved'
+    status: 'waiting' | 'ai' | 'attending' | 'resolved' | 'archived'
     agentName: string
     agentType: 'ai' | 'human'
     pipelineStage?: string
@@ -181,56 +196,71 @@ export default function AdminInbox() {
     const navigate = useNavigate()
     const { selectedCompany } = useViewContext()
     const { isConfigured } = useClientDatabaseStatus()
+    const { user } = useAuth()
 
-    // Hooks for real data
-    const conversationsQuery = useConversations()
-    const sendMessage = useSendMessage()
-    const updateMode = useUpdateConversationMode()
-
-    const [activeTab, setActiveTab] = useState<string | null>('ai')
+    // State declarations first
+    const [activeTab, setActiveTab] = useState<string | null>('all')
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
     const [message, setMessage] = useState('')
     const [search, setSearch] = useState('')
     const [isRecording, setIsRecording] = useState(false)
     const [isConnected, setIsConnected] = useState(true) // WhatsApp connection status
+    const [needsSetup, setNeedsSetup] = useState(false)
 
-    // Messages for selected conversation
-    const messagesQuery = useMessages(selectedConversationId)
+    // Hooks for real data (now activeTab and selectedConversationId are defined)
+    const statusFilter = activeTab === 'all' ? undefined : activeTab as ApiConversation['status']
+    const { data: apiConversations, isLoading, error, refetch } = useChatConversations({ status: statusFilter })
+    const sendMessage = useSendChatMessage()
+    const takeOver = useTakeChatOver()
+    const markAsRead = useMarkChatAsRead()
+    const resolveConversation = useResolveChatConversation()
+    const { data: stats } = useChatStats()
 
-    // Transform API conversations to local format or use mock
-    const rawConversations = conversationsQuery.data?.items || []
-    const conversations: Conversation[] = rawConversations.length > 0 ? rawConversations.map(c => ({
+    // Real-time subscriptions
+    useRealtimeChatConversations()
+    useRealtimeChatMessages(selectedConversationId)
+
+    // Check for table not found
+    useEffect(() => {
+        if (error && (error as any)?.code === 'PGRST205') {
+            setNeedsSetup(true)
+        }
+    }, [error])
+
+    // Transform API conversations to local format or use mock when no real data
+    const conversations: Conversation[] = (apiConversations || []).map(c => ({
         id: c.id,
         contact: {
-            id: c.id,
+            id: c.contact_id || c.id,
             name: c.contact_name || 'Desconhecido',
             phone: c.contact_phone || '',
-            tags: [],
+            tags: c.tags || [],
         },
-        lastMessage: c.last_message || '',
+        lastMessage: c.last_message_preview || '',
         lastMessageAt: c.last_message_at ? new Date(c.last_message_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '',
         unreadCount: c.unread_count || 0,
-        status: c.status === 'active' ? 'attending' : c.status === 'waiting' ? 'waiting' : 'resolved',
-        agentName: c.agent_name || 'IA',
-        agentType: 'ai' as 'ai' | 'human',
-        pipelineStage: undefined,
-        proposalValue: undefined,
-        interestedServices: undefined,
-    })) : MOCK_CONVERSATIONS
+        status: c.status,
+        agentName: c.assigned_name || c.ai_agent_name || 'IA',
+        agentType: c.mode === 'human' ? 'human' : 'ai' as const,
+        pipelineStage: c.pipeline_stage || undefined,
+        proposalValue: c.proposal_value || undefined,
+    }))
+
+    // Messages for selected conversation
+    const { data: apiMessages } = useChatMessages(selectedConversationId)
+
+    // Transform messages
+    const messages: Message[] = (apiMessages || []).map((m: ApiMessage) => ({
+        id: m.id,
+        sender: m.sender_type === 'contact' ? 'contact' : m.sender_type as 'ai' | 'human',
+        type: m.content_type === 'system' ? 'system' : m.content_type as Message['type'],
+        content: m.content || '',
+        timestamp: new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        senderName: m.sender_name || undefined,
+    }))
 
     // Get selected conversation object
     const selectedConversation = conversations.find(c => c.id === selectedConversationId) || conversations[0] || null
-
-    // Transform messages or use mock
-    const rawMessages = messagesQuery.data || []
-    const messages: Message[] = rawMessages.length > 0 ? rawMessages.map((m: ApiMessage) => ({
-        id: m.id,
-        sender: m.sender_type === 'client' ? 'contact' : m.sender_type as 'ai' | 'human',
-        type: m.content_type === 'text' ? 'text' : m.content_type as Message['type'],
-        content: m.content,
-        timestamp: new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        senderName: m.metadata?.sender_name as string | undefined,
-    })) : MOCK_MESSAGES
 
     // CRM panel state (editable)
     const [pipelineStage, setPipelineStage] = useState(selectedConversation?.pipelineStage || '')
@@ -248,20 +278,19 @@ export default function AdminInbox() {
         }
     }, [selectedConversation])
 
-    // Filter conversations by tab and search
-    const filteredConversations = MOCK_CONVERSATIONS.filter(c => {
-        const matchesSearch = c.contact.name.toLowerCase().includes(search.toLowerCase()) ||
+    // Filter conversations by search
+    const filteredConversations = conversations.filter(c => {
+        const matchesSearch = !search || c.contact.name.toLowerCase().includes(search.toLowerCase()) ||
             c.contact.phone.includes(search)
-        const matchesTab = activeTab === 'all' || c.status === activeTab
-        return matchesSearch && matchesTab
+        return matchesSearch
     })
 
-    // Count per status
+    // Count per status from stats
     const counts = {
-        waiting: MOCK_CONVERSATIONS.filter(c => c.status === 'waiting').length,
-        ai: MOCK_CONVERSATIONS.filter(c => c.status === 'ai').length,
-        attending: MOCK_CONVERSATIONS.filter(c => c.status === 'attending').length,
-        resolved: MOCK_CONVERSATIONS.filter(c => c.status === 'resolved').length,
+        waiting: stats?.byStatus?.waiting || 0,
+        ai: stats?.byStatus?.ai || 0,
+        attending: stats?.byStatus?.attending || 0,
+        resolved: stats?.byStatus?.resolved || 0,
     }
 
     const handleSendMessage = () => {

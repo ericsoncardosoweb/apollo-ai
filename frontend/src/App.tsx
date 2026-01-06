@@ -45,6 +45,9 @@ import AdminKnowledge from '@/pages/admin/Knowledge'
 import AdminAnalytics from '@/pages/admin/Analytics'
 import AdminSettings from '@/pages/admin/Settings'
 import AdminCRMBoard from '@/pages/admin/CRMBoard'
+import AdminCampaigns from '@/pages/admin/Campaigns'
+import AdminConnections from '@/pages/admin/Connections'
+import AdminQuickReplies from '@/pages/admin/QuickReplies'
 
 // Client/App Pages (subset of admin - shared components)
 import AppDashboard from '@/pages/app/Dashboard'
@@ -218,6 +221,9 @@ function AppRoutes() {
                 <Route path="agents" element={<AdminAgents />} />
                 <Route path="tools" element={<AdminTools />} />
                 <Route path="knowledge" element={<AdminKnowledge />} />
+                <Route path="campaigns" element={<AdminCampaigns />} />
+                <Route path="connections" element={<AdminConnections />} />
+                <Route path="quick-replies" element={<AdminQuickReplies />} />
                 <Route path="analytics" element={<AdminAnalytics />} />
                 <Route path="settings" element={<AdminSettings />} />
             </Route>
