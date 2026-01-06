@@ -44,6 +44,7 @@ import AdminTools from '@/pages/admin/Tools'
 import AdminKnowledge from '@/pages/admin/Knowledge'
 import AdminAnalytics from '@/pages/admin/Analytics'
 import AdminSettings from '@/pages/admin/Settings'
+import AdminCRMBoard from '@/pages/admin/CRMBoard'
 
 // Client/App Pages (subset of admin - shared components)
 import AppDashboard from '@/pages/app/Dashboard'
@@ -210,7 +211,7 @@ function AppRoutes() {
             }>
                 <Route index element={<AdminDashboardNew />} />
                 <Route path="inbox" element={<AdminInbox />} />
-                <Route path="crm" element={<AppCRM />} />
+                <Route path="crm" element={<AdminCRMBoard />} />
                 <Route path="contacts" element={<AdminContacts />} />
                 <Route path="messaging" element={<AdminMessaging />} />
                 <Route path="services" element={<AdminServices />} />

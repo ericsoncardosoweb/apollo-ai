@@ -20,10 +20,19 @@ class SupabaseClient:
 
     _anon_client: Client | None = None
     _service_client: Client | None = None
+    _initialized: bool = False
 
     @classmethod
-    def get_anon_client(cls) -> Client:
+    def _is_configured(cls) -> bool:
+        """Check if Supabase credentials are configured."""
+        return bool(settings.supabase_url and settings.supabase_anon_key)
+
+    @classmethod
+    def get_anon_client(cls) -> Client | None:
         """Get Supabase client with anon key (for user-context operations)."""
+        if not cls._is_configured():
+            logger.warning("Supabase not configured - missing URL or anon key")
+            return None
         if cls._anon_client is None:
             cls._anon_client = create_client(
                 settings.supabase_url,
@@ -33,8 +42,11 @@ class SupabaseClient:
         return cls._anon_client
 
     @classmethod
-    def get_service_client(cls) -> Client:
+    def get_service_client(cls) -> Client | None:
         """Get Supabase client with service role key (bypasses RLS)."""
+        if not cls._is_configured():
+            logger.warning("Supabase not configured - missing credentials")
+            return None
         if cls._service_client is None:
             cls._service_client = create_client(
                 settings.supabase_url,
@@ -44,8 +56,11 @@ class SupabaseClient:
         return cls._service_client
 
     @classmethod
-    def get_authenticated_client(cls, access_token: str) -> Client:
+    def get_authenticated_client(cls, access_token: str) -> Client | None:
         """Get Supabase client authenticated with user's JWT."""
+        if not cls._is_configured():
+            logger.warning("Supabase not configured - cannot authenticate")
+            return None
         client = create_client(
             settings.supabase_url,
             settings.supabase_anon_key
@@ -54,8 +69,7 @@ class SupabaseClient:
         return client
 
 
-@lru_cache
-def get_supabase() -> Client:
+def get_supabase() -> Client | None:
     """Get default Supabase client (service role for backend operations)."""
     return SupabaseClient.get_service_client()
 
