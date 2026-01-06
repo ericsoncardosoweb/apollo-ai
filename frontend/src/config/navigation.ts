@@ -17,8 +17,15 @@ import {
     IconAddressBook,
     IconLayoutKanban,
     IconCrown,
+    IconPackage,
+    IconAdjustments,
+    IconTestPipe,
+    IconLock,
 } from '@tabler/icons-react'
 import { NavItem, UserRole } from '@/types'
+
+// Alias for IconAdjustments as IconCogs
+const IconCogs = IconAdjustments
 
 // Master/Global Platform navigation items (/master/*)
 export const masterNavItems: NavItem[] = [
@@ -111,24 +118,10 @@ export const adminNavItems: NavItem[] = [
         roles: ['master', 'admin', 'operator'],
     },
     {
-        label: 'Agentes IA',
-        href: '/admin/agents',
-        icon: IconRobot,
-        description: 'Editor de prompts',
-        roles: ['master', 'admin', 'operator'],
-    },
-    {
-        label: 'Ferramentas',
-        href: '/admin/tools',
-        icon: IconSettings,
-        description: 'Funções e integrações',
-        roles: ['master', 'admin', 'operator'],
-    },
-    {
-        label: 'Base de Conhecimento',
-        href: '/admin/knowledge',
-        icon: IconAddressBook,
-        description: 'RAG e documentos',
+        label: 'Serviços',
+        href: '/admin/services',
+        icon: IconPackage,
+        description: 'Catálogo de serviços',
         roles: ['master', 'admin', 'operator'],
     },
     {
@@ -138,12 +131,65 @@ export const adminNavItems: NavItem[] = [
         description: 'Relatórios e métricas',
         roles: ['master', 'admin', 'operator'],
     },
+    // Grupo Estrutura com subitems
     {
-        label: 'Configurações',
-        href: '/admin/settings',
-        icon: IconSettings,
-        description: 'Configurações da empresa',
-        roles: ['master', 'admin'],
+        label: 'Estrutura',
+        href: '#estrutura',
+        icon: IconCogs,
+        description: 'Configuração da estrutura do sistema',
+        roles: ['master', 'admin', 'operator'],
+        isGroup: true,
+        children: [
+            {
+                label: 'Agentes IA',
+                href: '/admin/agents',
+                icon: IconRobot,
+                description: 'Editor de prompts',
+                roles: ['master', 'admin', 'operator'],
+            },
+            {
+                label: 'Testes Inteligentes',
+                href: '/admin/tests',
+                icon: IconTestPipe,
+                description: 'Testes de agentes',
+                roles: ['master', 'admin', 'operator'],
+            },
+            {
+                label: 'Ferramentas',
+                href: '/admin/tools',
+                icon: IconSettings,
+                description: 'Funções e integrações',
+                roles: ['master', 'admin', 'operator'],
+            },
+            {
+                label: 'Base de Conhecimento',
+                href: '/admin/knowledge',
+                icon: IconAddressBook,
+                description: 'RAG e documentos',
+                roles: ['master', 'admin', 'operator'],
+            },
+            {
+                label: 'Controle de Acessos',
+                href: '/admin/access',
+                icon: IconLock,
+                description: 'Permissões e acessos',
+                roles: ['master', 'admin'],
+            },
+            {
+                label: 'Usuários',
+                href: '/admin/users',
+                icon: IconUsers,
+                description: 'Usuários da empresa',
+                roles: ['master', 'admin'],
+            },
+            {
+                label: 'Configurações',
+                href: '/admin/settings',
+                icon: IconSettings,
+                description: 'Configurações da empresa',
+                roles: ['master', 'admin'],
+            },
+        ],
     },
 ]
 

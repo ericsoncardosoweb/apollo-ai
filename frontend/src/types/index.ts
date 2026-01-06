@@ -35,6 +35,10 @@ export interface Company {
     owner_id: string | null
     is_active: boolean
     created_at: string
+    /** Pipeline stage for project management */
+    pipeline_stage?: 'lead' | 'onboard' | 'implantacao' | 'ativo' | 'churn' | null
+    /** Company status */
+    status?: string | null
 }
 
 // Company membership
@@ -59,6 +63,10 @@ export interface NavItem {
     description?: string
     roles: UserRole[]
     badge?: string | number
+    /** Nested navigation items (for expandable groups) */
+    children?: NavItem[]
+    /** If true, this is just a group header */
+    isGroup?: boolean
 }
 
 // Conversation in Inbox

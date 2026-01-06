@@ -4,7 +4,7 @@ Apollo A.I. Advanced - API v1 Router
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, tenants, agents, conversations, messages, crm, tools, webhooks
+from app.api.v1 import auth, tenants, agents, conversations, messages, crm, tools, webhooks, uploads
 
 router = APIRouter()
 
@@ -17,3 +17,5 @@ router.include_router(messages.router, prefix="/messages", tags=["Messages"])
 router.include_router(crm.router, prefix="/crm", tags=["CRM"])
 router.include_router(tools.router, prefix="/tools", tags=["Tools"])
 router.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
+router.include_router(uploads.router)
+

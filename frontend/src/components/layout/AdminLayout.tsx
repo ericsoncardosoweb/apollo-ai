@@ -45,6 +45,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useViewContext } from '@/contexts/ViewContext'
 import { adminNavItems } from '@/config/navigation'
 import CompanySpotlight from '@/components/company/CompanySpotlight'
+import AdminFAB from '@/components/admin/AdminFAB'
 import logoImage from '@/assets/logo/logo.png'
 
 // Theme color for Admin/Gestão environment
@@ -146,6 +147,28 @@ export default function AdminLayout() {
                                 </Button>
                             </Tooltip>
 
+                            {/* Stage Badge */}
+                            {selectedCompany.pipeline_stage && (
+                                <Badge
+                                    size="sm"
+                                    color={
+                                        selectedCompany.pipeline_stage === 'ativo' ? 'green' :
+                                            selectedCompany.pipeline_stage === 'implantacao' ? 'blue' :
+                                                selectedCompany.pipeline_stage === 'onboard' ? 'yellow' :
+                                                    selectedCompany.pipeline_stage === 'lead' ? 'gray' :
+                                                        'red'
+                                    }
+                                    variant="light"
+                                >
+                                    {selectedCompany.pipeline_stage === 'ativo' ? 'Ativo' :
+                                        selectedCompany.pipeline_stage === 'implantacao' ? 'Implantação' :
+                                            selectedCompany.pipeline_stage === 'onboard' ? 'Onboard' :
+                                                selectedCompany.pipeline_stage === 'lead' ? 'Lead' :
+                                                    selectedCompany.pipeline_stage === 'churn' ? 'Churn' :
+                                                        selectedCompany.pipeline_stage}
+                                </Badge>
+                            )}
+
                             {/* Ver como Cliente */}
                             <Tooltip label="Ver como cliente">
                                 <ActionIcon
@@ -234,28 +257,61 @@ export default function AdminLayout() {
 
                     <AppShell.Section grow component={ScrollArea}>
                         <Stack gap={4}>
-                            {adminNavItems.map((item) => (
-                                <MantineNavLink
-                                    key={item.href}
-                                    component={NavLink}
-                                    to={item.href}
-                                    label={item.label}
-                                    description={item.description}
-                                    leftSection={
-                                        <ThemeIcon variant="light" size="md" color={THEME_COLOR}>
-                                            <item.icon size={16} />
-                                        </ThemeIcon>
-                                    }
-                                    rightSection={
-                                        typeof item.badge === 'number' && item.badge > 0 ? (
-                                            <Badge size="xs" color={THEME_COLOR}>{item.badge}</Badge>
-                                        ) : (
-                                            <IconChevronRight size={14} />
-                                        )
-                                    }
-                                    style={{ borderRadius: 'var(--mantine-radius-md)' }}
-                                />
-                            ))}
+                            {adminNavItems.map((item) =>
+                                item.children ? (
+                                    // Expandable group with children
+                                    <MantineNavLink
+                                        key={item.href}
+                                        label={item.label}
+                                        description={item.description}
+                                        leftSection={
+                                            <ThemeIcon variant="light" size="md" color={THEME_COLOR}>
+                                                <item.icon size={16} />
+                                            </ThemeIcon>
+                                        }
+                                        childrenOffset={28}
+                                        defaultOpened={false}
+                                        style={{ borderRadius: 'var(--mantine-radius-md)' }}
+                                    >
+                                        {item.children.map((child) => (
+                                            <MantineNavLink
+                                                key={child.href}
+                                                component={NavLink}
+                                                to={child.href}
+                                                label={child.label}
+                                                leftSection={
+                                                    <ThemeIcon variant="subtle" size="sm" color={THEME_COLOR}>
+                                                        <child.icon size={14} />
+                                                    </ThemeIcon>
+                                                }
+                                                style={{ borderRadius: 'var(--mantine-radius-md)' }}
+                                            />
+                                        ))}
+                                    </MantineNavLink>
+                                ) : (
+                                    // Regular nav item
+                                    <MantineNavLink
+                                        key={item.href}
+                                        component={NavLink}
+                                        to={item.href}
+                                        label={item.label}
+                                        description={item.description}
+                                        leftSection={
+                                            <ThemeIcon variant="light" size="md" color={THEME_COLOR}>
+                                                <item.icon size={16} />
+                                            </ThemeIcon>
+                                        }
+                                        rightSection={
+                                            typeof item.badge === 'number' && item.badge > 0 ? (
+                                                <Badge size="xs" color={THEME_COLOR}>{item.badge}</Badge>
+                                            ) : (
+                                                <IconChevronRight size={14} />
+                                            )
+                                        }
+                                        style={{ borderRadius: 'var(--mantine-radius-md)' }}
+                                    />
+                                )
+                            )}
                         </Stack>
                     </AppShell.Section>
 
@@ -279,6 +335,7 @@ export default function AdminLayout() {
 
                 <AppShell.Main>
                     <Outlet />
+                    <AdminFAB />
                 </AppShell.Main>
             </AppShell>
 

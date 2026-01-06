@@ -219,11 +219,15 @@ export function useClientServicesStats() {
                 byType[s.type] = (byType[s.type] || 0) + 1
             })
 
+            const totalPrice = services?.reduce((acc, s) => acc + (s.price || 0), 0) || 0
+            const averagePrice = active > 0 ? totalPrice / active : 0
+
             return {
                 total,
                 active,
                 featured,
                 byType,
+                averagePrice,
             }
         },
         enabled: !clientLoading && !!tenantId,

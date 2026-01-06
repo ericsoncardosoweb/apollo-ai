@@ -38,6 +38,7 @@ import AdminDashboardNew from '@/pages/admin/AdminDashboard'
 import AdminInbox from '@/pages/admin/Inbox'
 import AdminContacts from '@/pages/admin/Contacts'
 import AdminMessaging from '@/pages/admin/Messaging'
+import AdminServices from '@/pages/admin/Services'
 import AdminAgents from '@/pages/admin/Agents'
 import AdminTools from '@/pages/admin/Tools'
 import AdminKnowledge from '@/pages/admin/Knowledge'
@@ -212,6 +213,7 @@ function AppRoutes() {
                 <Route path="crm" element={<AppCRM />} />
                 <Route path="contacts" element={<AdminContacts />} />
                 <Route path="messaging" element={<AdminMessaging />} />
+                <Route path="services" element={<AdminServices />} />
                 <Route path="agents" element={<AdminAgents />} />
                 <Route path="tools" element={<AdminTools />} />
                 <Route path="knowledge" element={<AdminKnowledge />} />

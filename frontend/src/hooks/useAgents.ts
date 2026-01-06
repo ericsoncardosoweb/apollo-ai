@@ -55,6 +55,7 @@ export interface CreateAgentInput {
     model_name?: string
     temperature?: number
     max_tokens?: number
+    rag_enabled?: boolean
 }
 
 export interface UpdateAgentInput extends Partial<CreateAgentInput> {

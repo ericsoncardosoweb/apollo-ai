@@ -85,8 +85,6 @@ export function PhoneInput({
                         borderLeft: 0,
                     },
                 }}
-                component={IMaskInput}
-                mask="(00) 00000-0000"
             />
         </Group>
     )
@@ -162,8 +160,6 @@ export const CEPInput = forwardRef<HTMLInputElement, CEPInputProps>(
                 onChange={handleChange}
                 leftSection={<IconMapPin size={16} />}
                 placeholder="00000-000"
-                component={IMaskInput}
-                mask="00000-000"
             />
         )
     }
@@ -189,8 +185,6 @@ export const CNPJInput = forwardRef<HTMLInputElement, CNPJInputProps>(
                 onChange={(e) => onChange?.(e.target.value)}
                 leftSection={<IconBuilding size={16} />}
                 placeholder="00.000.000/0000-00"
-                component={IMaskInput}
-                mask="00.000.000/0000-00"
             />
         )
     }
@@ -216,8 +210,6 @@ export const CPFInput = forwardRef<HTMLInputElement, CPFInputProps>(
                 onChange={(e) => onChange?.(e.target.value)}
                 leftSection={<IconUser size={16} />}
                 placeholder="000.000.000-00"
-                component={IMaskInput}
-                mask="000.000.000-00"
             />
         )
     }
@@ -273,8 +265,6 @@ export const DateInput = forwardRef<HTMLInputElement, DateInputProps>(
                 leftSection={<IconCalendar size={16} />}
                 placeholder="DD/MM/AAAA"
                 error={error || props.error}
-                component={IMaskInput}
-                mask="00/00/0000"
             />
         )
     }
