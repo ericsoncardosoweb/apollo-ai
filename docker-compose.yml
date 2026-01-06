@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  # ===========================================
+  # BACKEND - Python FastAPI
+  # ===========================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: apollo-backend
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend:/app
+      - /app/.venv  # Exclude venv from mount
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEBUG=${DEBUG:-true}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      - redis
+    networks:
+      - apollo-network
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ===========================================
+  # CELERY WORKER - Background Tasks
+  # ===========================================
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: apollo-celery-worker
+    volumes:
+      - ./backend:/app
+      - /app/.venv
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      - redis
+      - backend
+    networks:
+      - apollo-network
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app worker --loglevel=info
+
+  # ===========================================
+  # CELERY BEAT - Scheduled Tasks
+  # ===========================================
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: apollo-celery-beat
+    volumes:
+      - ./backend:/app
+      - /app/.venv
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      - redis
+      - celery-worker
+    networks:
+      - apollo-network
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app beat --loglevel=info
+
+  # ===========================================
+  # FRONTEND - React Vite
+  # ===========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend
+      target: development
+    container_name: apollo-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules  # Exclude node_modules from mount
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+      - VITE_SUPABASE_URL=${SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+    depends_on:
+      - backend
+    networks:
+      - apollo-network
+    restart: unless-stopped
+
+  # ===========================================
+  # REDIS - Queue & Cache
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: apollo-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - apollo-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+# ===========================================
+# NETWORKS
+# ===========================================
+networks:
+  apollo-network:
+    driver: bridge
+
+# ===========================================
+# VOLUMES
+# ===========================================
+volumes:
+  redis-data:
