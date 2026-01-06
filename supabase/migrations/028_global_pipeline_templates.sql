@@ -22,8 +22,8 @@ CREATE TABLE IF NOT EXISTS global_pipeline_templates (
     -- Usage stats
     usage_count INT DEFAULT 0,
     
-    -- Creator
-    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    -- Creator (stored as text, no FK)
+    created_by_id UUID,
     created_by_name VARCHAR(255),
     
     -- Control
