@@ -1,6 +1,9 @@
+/**
+ * Client Layout - Company Users (Operators & Managers)
+ * Uses Mantine AppShell with role-based dynamic navigation
+ */
+
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { useAuth } from '@/contexts/AuthContext'
-import { useTenant } from '@/contexts/TenantContext'
 import {
     AppShell,
     Burger,
@@ -16,73 +19,32 @@ import {
     useMantineColorScheme,
     Stack,
     Badge,
+    UnstyledButton,
+    ScrollArea,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import {
-    IconDashboard,
-    IconInbox,
-    IconUsers,
-    IconRobot,
-    IconChartBar,
-    IconSettings,
-    IconLogout,
     IconSun,
     IconMoon,
+    IconLogout,
+    IconSettings,
     IconChevronRight,
-    IconBriefcase,
+    IconRocket,
+    IconBuilding,
 } from '@tabler/icons-react'
-
-const clientNavigation = [
-    {
-        label: 'Dashboard',
-        href: '/app',
-        icon: IconDashboard,
-        description: 'Visão geral do seu negócio'
-    },
-    {
-        label: 'Inbox',
-        href: '/app/inbox',
-        icon: IconInbox,
-        description: 'Conversas e mensagens'
-    },
-    {
-        label: 'CRM',
-        href: '/app/crm',
-        icon: IconBriefcase,
-        description: 'Gerenciar oportunidades'
-    },
-    {
-        label: 'Contatos',
-        href: '/app/contacts',
-        icon: IconUsers,
-        description: 'Base de contatos'
-    },
-    {
-        label: 'Agentes IA',
-        href: '/app/agents',
-        icon: IconRobot,
-        description: 'Performance dos agentes'
-    },
-    {
-        label: 'Analytics',
-        href: '/app/analytics',
-        icon: IconChartBar,
-        description: 'Métricas e relatórios'
-    },
-    {
-        label: 'Configurações',
-        href: '/app/settings',
-        icon: IconSettings,
-        description: 'Configurações da empresa'
-    },
-]
+import { useAuth } from '@/contexts/AuthContext'
+import { useTenant } from '@/contexts/TenantContext'
+import { getNavItemsForRole, clientNavItems } from '@/config/navigation'
 
 export default function ClientLayout() {
     const [opened, { toggle }] = useDisclosure()
-    const { signOut, user } = useAuth()
+    const { colorScheme, toggleColorScheme } = useMantineColorScheme()
+    const { user, profile, role, signOut } = useAuth()
     const { tenant } = useTenant()
     const navigate = useNavigate()
-    const { colorScheme, toggleColorScheme } = useMantineColorScheme()
+
+    // Get navigation items based on user role
+    const navItems = getNavItemsForRole(clientNavItems, role)
 
     const handleSignOut = async () => {
         await signOut()
@@ -95,63 +57,70 @@ export default function ClientLayout() {
             navbar={{
                 width: 280,
                 breakpoint: 'sm',
-                collapsed: { mobile: !opened },
+                collapsed: { mobile: !opened }
             }}
             padding="md"
         >
-            {/* Header */}
             <AppShell.Header>
                 <Group h="100%" px="md" justify="space-between">
                     <Group>
-                        <Burger
-                            opened={opened}
-                            onClick={toggle}
-                            hiddenFrom="sm"
-                            size="sm"
-                        />
-                        <Group gap="xs">
-                            <ThemeIcon size="lg" radius="md" variant="gradient" gradient={{ from: 'teal', to: 'cyan' }}>
-                                <Text fw={700} size="sm">
-                                    {tenant?.name?.charAt(0).toUpperCase() || 'A'}
-                                </Text>
-                            </ThemeIcon>
-                            <Box>
-                                <Text fw={600} size="sm">{tenant?.name || 'Apollo A.I.'}</Text>
-                                <Text size="xs" c="dimmed">Portal do Cliente</Text>
-                            </Box>
-                        </Group>
+                        <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
+                        <ThemeIcon
+                            size="lg"
+                            radius="md"
+                            variant="gradient"
+                            gradient={{ from: 'teal', to: 'cyan' }}
+                        >
+                            <IconRocket size={20} />
+                        </ThemeIcon>
+                        <div>
+                            <Text size="sm" fw={700}>
+                                {tenant?.name || 'Apollo A.I.'}
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                                {role === 'operator' ? 'Operador' : 'Gerente'}
+                            </Text>
+                        </div>
                     </Group>
 
                     <Group gap="xs">
                         <ActionIcon
                             variant="subtle"
-                            onClick={() => toggleColorScheme()}
+                            onClick={toggleColorScheme}
                             size="lg"
-                            radius="md"
                         >
                             {colorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
                         </ActionIcon>
 
-                        <Menu shadow="md" width={200} position="bottom-end">
+                        <Menu shadow="md" width={220} position="bottom-end">
                             <Menu.Target>
-                                <ActionIcon variant="subtle" size="lg" radius="xl">
-                                    <Avatar size="sm" radius="xl" color="teal">
-                                        {user?.email?.charAt(0).toUpperCase()}
-                                    </Avatar>
-                                </ActionIcon>
+                                <UnstyledButton>
+                                    <Group gap="xs">
+                                        <Avatar
+                                            radius="xl"
+                                            size="sm"
+                                            color="teal"
+                                            src={profile?.avatar_url}
+                                        >
+                                            {profile?.name?.charAt(0) || user?.email?.charAt(0) || 'U'}
+                                        </Avatar>
+                                        <div style={{ lineHeight: 1 }}>
+                                            <Text size="sm" fw={500}>
+                                                {profile?.name || 'Usuário'}
+                                            </Text>
+                                            <Text size="xs" c="dimmed">
+                                                {user?.email}
+                                            </Text>
+                                        </div>
+                                    </Group>
+                                </UnstyledButton>
                             </Menu.Target>
                             <Menu.Dropdown>
-                                <Menu.Label>
-                                    <Text size="xs" c="dimmed">Conectado como</Text>
-                                    <Text size="sm" fw={500} truncate>{user?.email}</Text>
-                                </Menu.Label>
-                                <Menu.Divider />
-                                <Menu.Item
-                                    leftSection={<IconSettings size={14} />}
-                                    onClick={() => navigate('/app/settings')}
-                                >
-                                    Configurações
+                                <Menu.Label>Conta</Menu.Label>
+                                <Menu.Item leftSection={<IconSettings size={14} />}>
+                                    Meu Perfil
                                 </Menu.Item>
+                                <Menu.Divider />
                                 <Menu.Item
                                     color="red"
                                     leftSection={<IconLogout size={14} />}
@@ -165,53 +134,65 @@ export default function ClientLayout() {
                 </Group>
             </AppShell.Header>
 
-            {/* Sidebar */}
             <AppShell.Navbar p="md">
-                <AppShell.Section grow>
+                <AppShell.Section>
+                    <Group mb="md" gap="xs">
+                        <ThemeIcon size="sm" variant="light" color="teal">
+                            <IconBuilding size={12} />
+                        </ThemeIcon>
+                        <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
+                            {tenant?.name || 'Workspace'}
+                        </Text>
+                    </Group>
+                </AppShell.Section>
+
+                <AppShell.Section grow component={ScrollArea}>
                     <Stack gap={4}>
-                        {clientNavigation.map((item) => (
-                            <NavLink
+                        {navItems.map((item) => (
+                            <MantineNavLink
                                 key={item.href}
+                                component={NavLink}
                                 to={item.href}
-                                end={item.href === '/app'}
-                            >
-                                {({ isActive }) => (
-                                    <MantineNavLink
-                                        active={isActive}
-                                        label={item.label}
-                                        description={item.description}
-                                        leftSection={<item.icon size={20} stroke={1.5} />}
-                                        rightSection={<IconChevronRight size={14} stroke={1.5} />}
-                                        variant="filled"
-                                        color="teal"
-                                        styles={{
-                                            root: {
-                                                borderRadius: 'var(--mantine-radius-md)',
-                                            },
-                                        }}
-                                    />
-                                )}
-                            </NavLink>
+                                label={item.label}
+                                description={item.description}
+                                leftSection={
+                                    <ThemeIcon variant="light" size="md" color="teal">
+                                        <item.icon size={16} />
+                                    </ThemeIcon>
+                                }
+                                rightSection={
+                                    typeof item.badge === 'number' && item.badge > 0 ? (
+                                        <Badge size="xs" color="red">{item.badge}</Badge>
+                                    ) : (
+                                        <IconChevronRight size={14} />
+                                    )
+                                }
+                                style={{ borderRadius: 'var(--mantine-radius-md)' }}
+                            />
                         ))}
                     </Stack>
                 </AppShell.Section>
 
                 <AppShell.Section>
                     <Divider my="sm" />
-                    <Box p="xs">
-                        <Badge
-                            size="sm"
-                            variant="light"
-                            color={tenant?.plan === 'enterprise' ? 'violet' : tenant?.plan === 'pro' ? 'teal' : 'gray'}
-                            fullWidth
-                        >
-                            Plano {tenant?.plan?.charAt(0).toUpperCase()}{tenant?.plan?.slice(1) || 'Free'}
-                        </Badge>
+                    <Box p="xs" bg="dark.6" style={{ borderRadius: 'var(--mantine-radius-md)' }}>
+                        <Group justify="space-between">
+                            <div>
+                                <Text size="xs" fw={500}>
+                                    Plano {tenant?.plan || 'Pro'}
+                                </Text>
+                                <Text size="xs" c="dimmed">
+                                    3 agentes ativos
+                                </Text>
+                            </div>
+                            <Badge size="xs" variant="light" color="green">
+                                Ativo
+                            </Badge>
+                        </Group>
                     </Box>
                 </AppShell.Section>
             </AppShell.Navbar>
 
-            {/* Main Content */}
             <AppShell.Main>
                 <Outlet />
             </AppShell.Main>

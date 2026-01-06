@@ -5,7 +5,7 @@
 
 import {
     IconDashboard,
-    IconBuildingCompany,
+    IconBuilding,
     IconRobot,
     IconUsers,
     IconWebhook,
@@ -29,7 +29,7 @@ export const adminNavItems: NavItem[] = [
     {
         label: 'Empresas',
         href: '/admin/companies',
-        icon: IconBuildingCompany,
+        icon: IconBuilding,
         description: 'Gerenciar empresas clientes',
         roles: ['admin'],
     },
