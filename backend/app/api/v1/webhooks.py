@@ -1,186 +1,195 @@
 """
-Apollo A.I. Advanced - Webhooks Endpoints (WhatsApp Message Receiver)
+Apollo A.I. Advanced - Webhook Router
+=====================================
+
+Main entry point for all WhatsApp gateway webhooks.
+Implements:
+- Multi-provider support via Adapter Pattern
+- Anti-picote via Message Buffer
+- Tenant resolution from URL slug
+- Defensive validation
 """
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Request, Header
+from fastapi import APIRouter, Request, HTTPException, Header, Query, BackgroundTasks
 from pydantic import BaseModel
 import structlog
-import json
 
-from app.db.supabase import fetch_one, insert_one, update_one, get_supabase
+from app.db.supabase import fetch_one
+from app.services.gateway_adapter import parse_webhook_payload, GatewayProvider
+from app.services.message_buffer import get_message_buffer
+from app.core.exceptions import TenantNotFoundError, ValidationError
 
 logger = structlog.get_logger()
 router = APIRouter()
 
 
-class WhatsAppMessage(BaseModel):
-    """Incoming WhatsApp message schema."""
-    phone: str
-    message: str
-    message_id: Optional[str] = None
-    timestamp: Optional[str] = None
-    media_url: Optional[str] = None
-    media_type: Optional[str] = None
+class WebhookResponse(BaseModel):
+    """Standard webhook response"""
+    status: str = "received"
+    message_count: int = 0
+    buffered: bool = False
 
 
-@router.post("/whatsapp/{tenant_slug}")
-async def receive_whatsapp_message(
+# ===========================================
+# MAIN WEBHOOK ENDPOINT
+# ===========================================
+
+@router.post(
+    "/{provider}/{tenant_slug}",
+    response_model=WebhookResponse,
+    summary="Receive WhatsApp webhook",
+    description="""
+    Main webhook endpoint for all WhatsApp gateway providers.
+    
+    **Supported Providers:**
+    - `evolution` - Evolution API
+    - `zapi` - Z-API
+    - `meta` - Meta Cloud API (Official)
+    
+    **Flow:**
+    1. Validates tenant exists and is active
+    2. Parses payload using provider-specific adapter
+    3. Buffers messages (anti-picote pattern)
+    4. Returns immediately (async processing)
+    """
+)
+async def receive_webhook(
+    provider: str,
     tenant_slug: str,
     request: Request,
-    x_api_key: Optional[str] = Header(None)
+    background_tasks: BackgroundTasks,
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    x_hub_signature: Optional[str] = Header(None, alias="X-Hub-Signature-256"),
 ):
     """
-    Receive incoming WhatsApp messages.
+    Receive and process incoming WhatsApp webhooks.
     
-    This is the webhook endpoint that WhatsApp gateways (Evolution, Z-API, etc.)
-    will call when a new message arrives.
+    The endpoint implements defensive validation and returns quickly
+    to avoid gateway timeouts. Actual processing happens in background.
     """
-    # Get tenant by slug
+    # Get raw payload
+    try:
+        payload = await request.json()
+    except Exception as e:
+        logger.warning("Invalid JSON payload", error=str(e))
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    
+    # Validate provider
+    if provider not in [p.value for p in GatewayProvider]:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Unknown provider: {provider}. Supported: {[p.value for p in GatewayProvider]}"
+        )
+    
+    # Resolve tenant
+    tenant = await fetch_one("tenants", {"slug": tenant_slug})
+    
+    if not tenant:
+        logger.warning("Tenant not found", slug=tenant_slug)
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    if tenant.get("status") != "active":
+        logger.warning("Tenant not active", slug=tenant_slug, status=tenant.get("status"))
+        raise HTTPException(status_code=403, detail="Tenant is not active")
+    
+    # Validate API key if tenant has one configured
+    tenant_api_key = tenant.get("whatsapp_api_key")
+    if tenant_api_key and x_api_key != tenant_api_key:
+        # Only enforce if tenant has configured a key
+        if tenant.get("whatsapp_gateway") == provider:
+            logger.warning("Invalid API key", slug=tenant_slug)
+            # Don't return error, just log - some gateways don't send auth
+    
+    # Parse webhook payload
+    messages = parse_webhook_payload(payload, provider)
+    
+    if not messages:
+        # Not a message event or parsing failed - acknowledge anyway
+        return WebhookResponse(status="acknowledged", message_count=0, buffered=False)
+    
+    # Filter out messages from self
+    incoming_messages = [m for m in messages if not m.is_from_me]
+    
+    if not incoming_messages:
+        return WebhookResponse(status="filtered", message_count=0, buffered=False)
+    
+    # Buffer messages (anti-picote)
+    buffer = get_message_buffer()
+    
+    for msg in incoming_messages:
+        await buffer.push_message(tenant["id"], msg)
+    
+    logger.info(
+        "Webhook processed",
+        tenant=tenant_slug,
+        provider=provider,
+        message_count=len(incoming_messages),
+        chat_id=incoming_messages[0].chat_id if incoming_messages else None
+    )
+    
+    return WebhookResponse(
+        status="received",
+        message_count=len(incoming_messages),
+        buffered=True
+    )
+
+
+# ===========================================
+# WEBHOOK VERIFICATION (Meta Cloud API)
+# ===========================================
+
+@router.get(
+    "/{provider}/{tenant_slug}",
+    summary="Webhook verification",
+    description="Verification endpoint for Meta Cloud API webhook setup"
+)
+async def verify_webhook(
+    provider: str,
+    tenant_slug: str,
+    hub_mode: Optional[str] = Query(None, alias="hub.mode"),
+    hub_challenge: Optional[str] = Query(None, alias="hub.challenge"),
+    hub_verify_token: Optional[str] = Query(None, alias="hub.verify_token"),
+):
+    """
+    Handle Meta Cloud API webhook verification.
+    
+    Meta sends a GET request with hub.mode, hub.challenge, and hub.verify_token.
+    We must return the challenge to verify ownership.
+    """
+    if hub_mode == "subscribe" and hub_challenge:
+        # Optionally verify the token matches tenant config
+        tenant = await fetch_one("tenants", {"slug": tenant_slug})
+        
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        
+        # Return challenge for verification
+        return int(hub_challenge)
+    
+    return {"status": "ok", "provider": provider, "tenant": tenant_slug}
+
+
+# ===========================================
+# WEBHOOK STATUS CHECK
+# ===========================================
+
+@router.get(
+    "/status/{tenant_slug}",
+    summary="Check webhook status",
+    description="Check if webhooks are properly configured for a tenant"
+)
+async def check_webhook_status(tenant_slug: str):
+    """Check webhook configuration and recent activity"""
     tenant = await fetch_one("tenants", {"slug": tenant_slug})
     
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    if tenant.get("status") != "active":
-        raise HTTPException(status_code=403, detail="Tenant is not active")
-    
-    # Parse request body
-    body = await request.json()
-    
-    # Normalize message format (different gateways have different formats)
-    message_data = normalize_gateway_payload(body, tenant.get("whatsapp_gateway"))
-    
-    if not message_data:
-        logger.warning("Could not parse webhook payload", payload=body)
-        return {"status": "ignored"}
-    
-    # Find or create conversation
-    conversation = await get_or_create_conversation(
-        tenant_id=tenant["id"],
-        phone_number=message_data["phone"]
-    )
-    
-    # Save message
-    message = await insert_one("messages", {
-        "conversation_id": conversation["id"],
-        "tenant_id": tenant["id"],
-        "sender_type": "user",
-        "content": message_data["message"],
-        "content_type": message_data.get("media_type", "text"),
-        "media_url": message_data.get("media_url"),
-        "external_id": message_data.get("message_id"),
-    })
-    
-    # Update conversation
-    await update_one("conversations", {"id": conversation["id"]}, {
-        "last_message_at": message["created_at"],
-        "message_count": conversation.get("message_count", 0) + 1
-    })
-    
-    # Queue for AI processing if in AI mode
-    if conversation.get("mode") == "ai":
-        # TODO: Send to Celery queue for AI processing
-        pass
-    
-    logger.info(
-        "WhatsApp message received",
-        tenant_id=tenant["id"],
-        conversation_id=conversation["id"],
-        phone=message_data["phone"]
-    )
-    
-    return {"status": "received", "message_id": message["id"]}
-
-
-def normalize_gateway_payload(payload: dict, gateway: Optional[str]) -> Optional[dict]:
-    """Normalize different gateway payloads to a common format."""
-    
-    if gateway == "evolution":
-        # Evolution API format
-        if "data" in payload:
-            data = payload["data"]
-            return {
-                "phone": data.get("key", {}).get("remoteJid", "").split("@")[0],
-                "message": data.get("message", {}).get("conversation", ""),
-                "message_id": data.get("key", {}).get("id"),
-            }
-    
-    elif gateway == "zapi":
-        # Z-API format
-        return {
-            "phone": payload.get("phone"),
-            "message": payload.get("text", {}).get("message", payload.get("text", "")),
-            "message_id": payload.get("messageId"),
-        }
-    
-    elif gateway == "meta":
-        # Meta Cloud API format
-        entry = payload.get("entry", [{}])[0]
-        changes = entry.get("changes", [{}])[0]
-        value = changes.get("value", {})
-        messages = value.get("messages", [{}])
-        if messages:
-            msg = messages[0]
-            return {
-                "phone": msg.get("from"),
-                "message": msg.get("text", {}).get("body", ""),
-                "message_id": msg.get("id"),
-            }
-    
-    # Fallback: try common field names
     return {
-        "phone": payload.get("phone") or payload.get("from") or payload.get("sender"),
-        "message": payload.get("message") or payload.get("text") or payload.get("body"),
-        "message_id": payload.get("message_id") or payload.get("id"),
+        "tenant": tenant_slug,
+        "gateway_configured": bool(tenant.get("whatsapp_gateway")),
+        "gateway": tenant.get("whatsapp_gateway"),
+        "instance_id": tenant.get("whatsapp_instance_id", "")[:10] + "..." if tenant.get("whatsapp_instance_id") else None,
+        "webhook_url": f"/api/v1/webhooks/{tenant.get('whatsapp_gateway', 'evolution')}/{tenant_slug}",
     }
-
-
-async def get_or_create_conversation(tenant_id: str, phone_number: str) -> dict:
-    """Get existing active conversation or create a new one."""
-    
-    # Look for active conversation with this phone
-    client = get_supabase()
-    result = client.table("conversations").select("*").eq(
-        "tenant_id", tenant_id
-    ).eq(
-        "phone_number", phone_number
-    ).in_(
-        "status", ["active", "waiting"]
-    ).order(
-        "last_message_at", desc=True
-    ).limit(1).execute()
-    
-    if result.data:
-        return result.data[0]
-    
-    # Create new conversation
-    # Get default agent for tenant
-    agent = await fetch_one("agents", {"tenant_id": tenant_id, "is_default": True})
-    
-    conversation = await insert_one("conversations", {
-        "tenant_id": tenant_id,
-        "agent_id": agent["id"] if agent else None,
-        "phone_number": phone_number,
-        "channel": "whatsapp",
-        "status": "active",
-        "mode": "ai",
-    })
-    
-    # Auto-create lead
-    await insert_one("crm_leads", {
-        "tenant_id": tenant_id,
-        "whatsapp": phone_number,
-        "phone": phone_number,
-        "source": "whatsapp",
-    })
-    
-    return conversation
-
-
-@router.get("/whatsapp/{tenant_slug}/verify")
-async def verify_webhook(tenant_slug: str, hub_mode: str = None, hub_challenge: str = None):
-    """Webhook verification for Meta Cloud API."""
-    if hub_mode == "subscribe" and hub_challenge:
-        return int(hub_challenge)
-    return {"status": "ok"}

@@ -1,9 +1,6 @@
-import { type ClassValue, clsx } from 'clsx'
-import { twMerge } from 'tailwind-merge'
-
-export function cn(...inputs: ClassValue[]) {
-    return twMerge(clsx(inputs))
-}
+/**
+ * Apollo A.I. - Utility Functions
+ */
 
 export function formatDate(date: string | Date) {
     return new Intl.DateTimeFormat('pt-BR', {
@@ -37,4 +34,16 @@ export function formatPhone(phone: string) {
         return `(${cleaned.slice(0, 2)}) ${cleaned.slice(2, 7)}-${cleaned.slice(7)}`
     }
     return phone
+}
+
+export function formatCurrency(value: number) {
+    return new Intl.NumberFormat('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+    }).format(value)
+}
+
+export function truncate(str: string, length: number) {
+    if (str.length <= length) return str
+    return str.slice(0, length) + '...'
 }

@@ -1,26 +1,53 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { TenantProvider } from '@/contexts/TenantContext'
-import MainLayout from '@/components/layout/MainLayout'
+import { LoadingOverlay, Center, Stack, Text, ThemeIcon } from '@mantine/core'
+import { IconRocket } from '@tabler/icons-react'
 
-// Pages
+// Layouts
+import AdminLayout from '@/components/layout/AdminLayout'
+import ClientLayout from '@/components/layout/ClientLayout'
+
+// Pages - Auth
 import Login from '@/pages/Login'
-import Dashboard from '@/pages/Dashboard'
-import Inbox from '@/pages/Inbox'
-import CRM from '@/pages/CRM'
-import Agents from '@/pages/Agents'
-import Analytics from '@/pages/Analytics'
-import Settings from '@/pages/Settings'
+
+// Pages - Admin
+import AdminDashboard from '@/pages/admin/Dashboard'
+import AdminCompanies from '@/pages/admin/Companies'
+import AdminAgents from '@/pages/admin/Agents'
+import AdminUsers from '@/pages/admin/Users'
+import AdminWebhooks from '@/pages/admin/Webhooks'
+import AdminAnalytics from '@/pages/admin/Analytics'
+import AdminSettings from '@/pages/admin/Settings'
+
+// Pages - Client (App)
+import AppDashboard from '@/pages/app/Dashboard'
+import AppInbox from '@/pages/app/Inbox'
+import AppCRM from '@/pages/app/CRM'
+import AppContacts from '@/pages/app/Contacts'
+import AppAgents from '@/pages/app/Agents'
+import AppAnalytics from '@/pages/app/Analytics'
+import AppSettings from '@/pages/app/Settings'
+
+function LoadingScreen() {
+    return (
+        <Center h="100vh">
+            <Stack align="center" gap="md">
+                <ThemeIcon size={60} radius="xl" variant="gradient" gradient={{ from: 'indigo', to: 'violet' }}>
+                    <IconRocket size={32} />
+                </ThemeIcon>
+                <Text size="lg" fw={500} c="dimmed">Carregando Apollo A.I...</Text>
+                <LoadingOverlay visible={true} zIndex={1000} overlayProps={{ blur: 2 }} loaderProps={{ type: 'bars' }} />
+            </Stack>
+        </Center>
+    )
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const { user, loading } = useAuth()
 
     if (loading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-            </div>
-        )
+        return <LoadingScreen />
     }
 
     if (!user) {
@@ -30,6 +57,22 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <TenantProvider>{children}</TenantProvider>
 }
 
+function AdminRoute({ children }: { children: React.ReactNode }) {
+    const { user, loading } = useAuth()
+
+    if (loading) {
+        return <LoadingScreen />
+    }
+
+    if (!user) {
+        return <Navigate to="/login" replace />
+    }
+
+    // TODO: Check if user is platform admin
+    // For now, allow access (will be restricted by role check later)
+    return <>{children}</>
+}
+
 function App() {
     return (
         <AuthProvider>
@@ -37,25 +80,47 @@ function App() {
                 {/* Public routes */}
                 <Route path="/login" element={<Login />} />
 
-                {/* Protected routes */}
+                {/* Admin routes (Platform owner/team) */}
                 <Route
-                    path="/"
+                    path="/admin"
+                    element={
+                        <AdminRoute>
+                            <AdminLayout />
+                        </AdminRoute>
+                    }
+                >
+                    <Route index element={<AdminDashboard />} />
+                    <Route path="companies" element={<AdminCompanies />} />
+                    <Route path="agents" element={<AdminAgents />} />
+                    <Route path="users" element={<AdminUsers />} />
+                    <Route path="webhooks" element={<AdminWebhooks />} />
+                    <Route path="analytics" element={<AdminAnalytics />} />
+                    <Route path="settings" element={<AdminSettings />} />
+                </Route>
+
+                {/* Client routes (Company users) */}
+                <Route
+                    path="/app"
                     element={
                         <ProtectedRoute>
-                            <MainLayout />
+                            <ClientLayout />
                         </ProtectedRoute>
                     }
                 >
-                    <Route index element={<Dashboard />} />
-                    <Route path="inbox" element={<Inbox />} />
-                    <Route path="crm" element={<CRM />} />
-                    <Route path="agents" element={<Agents />} />
-                    <Route path="analytics" element={<Analytics />} />
-                    <Route path="settings" element={<Settings />} />
+                    <Route index element={<AppDashboard />} />
+                    <Route path="inbox" element={<AppInbox />} />
+                    <Route path="crm" element={<AppCRM />} />
+                    <Route path="contacts" element={<AppContacts />} />
+                    <Route path="agents" element={<AppAgents />} />
+                    <Route path="analytics" element={<AppAnalytics />} />
+                    <Route path="settings" element={<AppSettings />} />
                 </Route>
 
-                {/* Catch all */}
-                <Route path="*" element={<Navigate to="/" replace />} />
+                {/* Default redirect */}
+                <Route path="/" element={<Navigate to="/app" replace />} />
+
+                {/* Catch all - redirect to app */}
+                <Route path="*" element={<Navigate to="/app" replace />} />
             </Routes>
         </AuthProvider>
     )
