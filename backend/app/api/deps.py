@@ -51,6 +51,10 @@ async def get_current_user(
     # Validate with Supabase
     try:
         client = get_supabase()
+        
+        if client is None:
+            raise AuthenticationError("Supabase not configured. Please check environment variables.")
+        
         user_response = client.auth.get_user(token)
         
         if not user_response or not user_response.user:
@@ -73,6 +77,8 @@ async def get_current_user(
             "permissions": profile.get("permissions", {}),
         }
         
+    except AuthenticationError:
+        raise
     except Exception as e:
         logger.error("Authentication failed", error=str(e))
         raise HTTPException(

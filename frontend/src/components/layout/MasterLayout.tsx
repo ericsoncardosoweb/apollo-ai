@@ -47,6 +47,7 @@ import { useViewContext } from '@/contexts/ViewContext'
 import { masterNavItems } from '@/config/navigation'
 import { useAppStore } from '@/stores/useAppStore'
 import CompanySpotlight from '@/components/company/CompanySpotlight'
+import { MigrationAlert } from '@/components/shared/MigrationAlert'
 import logoImage from '@/assets/logo/logo.png'
 
 // Theme color for Master environment
@@ -300,6 +301,7 @@ export default function MasterLayout() {
                 </AppShell.Navbar>
 
                 <AppShell.Main>
+                    <MigrationAlert />
                     <Outlet />
                 </AppShell.Main>
             </AppShell>

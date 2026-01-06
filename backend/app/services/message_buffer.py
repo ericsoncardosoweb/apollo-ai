@@ -42,15 +42,22 @@ class MessageBufferService:
     then emits a complete packet for AI processing.
     """
     
-    def __init__(self, redis: Optional[RedisClient] = None):
-        self._redis = redis
+    def __init__(self):
+        self._redis_client = None
         self._handlers: List[Callable[[BufferedMessagePacket], Awaitable[None]]] = []
+        self._available = True
     
-    @property
-    def redis(self) -> RedisClient:
-        if not self._redis:
-            self._redis = get_redis()
-        return self._redis
+    async def _get_redis_client(self):
+        """Get Redis client (async). Returns None if not available."""
+        if not self._available:
+            return None
+        if self._redis_client is None:
+            client = await get_redis()
+            if client is None:
+                self._available = False
+                return None
+            self._redis_client = client
+        return self._redis_client
     
     def _get_buffer_key(self, tenant_id: str, chat_id: str) -> str:
         """Generate Redis key for message buffer"""
@@ -68,8 +75,13 @@ class MessageBufferService:
         """
         Push a message to the buffer and reset TTL.
         
-        Returns the current message count in buffer.
+        Returns the current message count in buffer. Returns 0 if Redis unavailable.
         """
+        redis = await self._get_redis_client()
+        if redis is None:
+            logger.warning("Redis not available, message not buffered")
+            return 0
+        
         key = self._get_buffer_key(tenant_id, message.chat_id)
         
         # Message data to store
@@ -87,114 +99,138 @@ class MessageBufferService:
             "tenant_id": tenant_id,
         }
         
-        # Add message to list
-        await self.redis.client.rpush(key, json.dumps(message_data))
-        
-        # Reset TTL - this is the core of anti-picote
-        await self.redis.client.expire(key, BUFFER_TTL_SECONDS)
-        
-        # Get current count
-        count = await self.redis.client.llen(key)
-        
-        logger.info(
-            "Message buffered",
-            tenant_id=tenant_id,
-            chat_id=message.chat_id,
-            buffer_count=count,
-            ttl=BUFFER_TTL_SECONDS
-        )
-        
-        return count
+        try:
+            # Add message to list
+            await redis.rpush(key, json.dumps(message_data))
+            
+            # Reset TTL - this is the core of anti-picote
+            await redis.expire(key, BUFFER_TTL_SECONDS)
+            
+            # Get current count
+            count = await redis.llen(key)
+            
+            logger.info(
+                "Message buffered",
+                tenant_id=tenant_id,
+                chat_id=message.chat_id,
+                buffer_count=count,
+                ttl=BUFFER_TTL_SECONDS
+            )
+            
+            return count
+        except Exception as e:
+            logger.error("Error buffering message", error=str(e))
+            return 0
     
     async def get_buffer(self, tenant_id: str, chat_id: str) -> Optional[BufferedMessagePacket]:
         """
         Get all buffered messages for a chat and clear the buffer.
         Uses distributed lock to prevent double-processing.
         """
+        redis = await self._get_redis_client()
+        if redis is None:
+            return None
+        
         key = self._get_buffer_key(tenant_id, chat_id)
         lock_key = self._get_lock_key(tenant_id, chat_id)
         
-        # Try to acquire lock (5 second TTL)
-        lock_acquired = await self.redis.client.set(
-            lock_key, "1", ex=5, nx=True
-        )
-        
-        if not lock_acquired:
-            logger.debug("Buffer already being processed", chat_id=chat_id)
-            return None
-        
         try:
-            # Get all messages atomically
-            messages_raw = await self.redis.client.lrange(key, 0, -1)
-            
-            if not messages_raw:
-                return None
-            
-            # Delete the buffer
-            await self.redis.client.delete(key)
-            
-            # Parse messages
-            messages = []
-            phone = ""
-            first_timestamp = None
-            last_timestamp = None
-            total_duration = 0
-            
-            for raw in messages_raw:
-                data = json.loads(raw)
-                msg = StandardMessage(
-                    message_id=data["message_id"],
-                    chat_id=data["chat_id"],
-                    phone=data["phone"],
-                    content=data.get("content", ""),
-                    content_type=data.get("content_type", "text"),
-                    media_url=data.get("media_url"),
-                    media_mime_type=data.get("media_mime_type"),
-                    media_duration_seconds=data.get("media_duration_seconds"),
-                    is_from_me=data.get("is_from_me", False),
-                    timestamp=datetime.fromisoformat(data["timestamp"]),
-                )
-                messages.append(msg)
-                
-                if not phone:
-                    phone = msg.phone
-                
-                ts = msg.timestamp
-                if first_timestamp is None or ts < first_timestamp:
-                    first_timestamp = ts
-                if last_timestamp is None or ts > last_timestamp:
-                    last_timestamp = ts
-                
-                if msg.media_duration_seconds:
-                    total_duration += msg.media_duration_seconds
-            
-            if not messages:
-                return None
-            
-            return BufferedMessagePacket(
-                chat_id=messages[0].chat_id,
-                tenant_id=tenant_id,
-                phone=phone,
-                messages=messages,
-                total_duration_seconds=total_duration,
-                first_message_at=first_timestamp or datetime.utcnow(),
-                last_message_at=last_timestamp or datetime.utcnow(),
+            # Try to acquire lock (5 second TTL)
+            lock_acquired = await redis.set(
+                lock_key, "1", ex=5, nx=True
             )
-        
-        finally:
-            # Release lock
-            await self.redis.client.delete(lock_key)
+            
+            if not lock_acquired:
+                logger.debug("Buffer already being processed", chat_id=chat_id)
+                return None
+            
+            try:
+                # Get all messages atomically
+                messages_raw = await redis.lrange(key, 0, -1)
+                
+                if not messages_raw:
+                    return None
+                
+                # Delete the buffer
+                await redis.delete(key)
+                
+                # Parse messages
+                messages = []
+                phone = ""
+                first_timestamp = None
+                last_timestamp = None
+                total_duration = 0
+                
+                for raw in messages_raw:
+                    data = json.loads(raw)
+                    msg = StandardMessage(
+                        message_id=data["message_id"],
+                        chat_id=data["chat_id"],
+                        phone=data["phone"],
+                        content=data.get("content", ""),
+                        content_type=data.get("content_type", "text"),
+                        media_url=data.get("media_url"),
+                        media_mime_type=data.get("media_mime_type"),
+                        media_duration_seconds=data.get("media_duration_seconds"),
+                        is_from_me=data.get("is_from_me", False),
+                        timestamp=datetime.fromisoformat(data["timestamp"]),
+                    )
+                    messages.append(msg)
+                    
+                    if not phone:
+                        phone = msg.phone
+                    
+                    ts = msg.timestamp
+                    if first_timestamp is None or ts < first_timestamp:
+                        first_timestamp = ts
+                    if last_timestamp is None or ts > last_timestamp:
+                        last_timestamp = ts
+                    
+                    if msg.media_duration_seconds:
+                        total_duration += msg.media_duration_seconds
+                
+                if not messages:
+                    return None
+                
+                return BufferedMessagePacket(
+                    chat_id=messages[0].chat_id,
+                    tenant_id=tenant_id,
+                    phone=phone,
+                    messages=messages,
+                    total_duration_seconds=total_duration,
+                    first_message_at=first_timestamp or datetime.utcnow(),
+                    last_message_at=last_timestamp or datetime.utcnow(),
+                )
+            
+            finally:
+                # Release lock
+                await redis.delete(lock_key)
+        except Exception as e:
+            logger.error("Error getting buffer", error=str(e))
+            return None
     
     async def peek_buffer(self, tenant_id: str, chat_id: str) -> int:
         """Get current message count in buffer without consuming"""
-        key = self._get_buffer_key(tenant_id, chat_id)
-        return await self.redis.client.llen(key)
+        redis = await self._get_redis_client()
+        if redis is None:
+            return 0
+        try:
+            key = self._get_buffer_key(tenant_id, chat_id)
+            return await redis.llen(key)
+        except Exception:
+            return 0
     
     async def clear_buffer(self, tenant_id: str, chat_id: str) -> bool:
         """Force clear a buffer (e.g., when handoff occurs)"""
-        key = self._get_buffer_key(tenant_id, chat_id)
-        deleted = await self.redis.client.delete(key)
-        return deleted > 0
+        redis = await self._get_redis_client()
+        if redis is None:
+            return False
+        try:
+            key = self._get_buffer_key(tenant_id, chat_id)
+            deleted = await redis.delete(key)
+            return deleted > 0
+        except Exception:
+            return False
     
     def on_buffer_ready(
         self, 
@@ -256,13 +292,19 @@ class BufferWatchdog:
         Requires Redis to be configured with:
         notify-keyspace-events Ex
         """
-        redis = self.buffer_service.redis
+        # Get Redis client
+        redis = await self.buffer_service._get_redis_client()
         
-        # Subscribe to expired key events
-        # Note: This requires Redis keyspace notifications enabled
-        pubsub = redis.client.pubsub()
+        if redis is None:
+            logger.warning("Redis not available, buffer watchdog disabled")
+            self._running = False
+            return
         
         try:
+            # Subscribe to expired key events
+            # Note: This requires Redis keyspace notifications enabled
+            pubsub = redis.pubsub()
+        
             # Subscribe to expired events for our buffer keys
             await pubsub.psubscribe("__keyevent@0__:expired")
             
@@ -303,7 +345,10 @@ class BufferWatchdog:
         except Exception as e:
             logger.error("Buffer watchdog error", error=str(e))
         finally:
-            await pubsub.punsubscribe()
+            try:
+                await pubsub.punsubscribe()
+            except Exception:
+                pass
 
 
 # Singleton instance

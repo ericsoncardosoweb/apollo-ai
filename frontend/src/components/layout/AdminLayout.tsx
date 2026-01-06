@@ -46,6 +46,7 @@ import { useViewContext } from '@/contexts/ViewContext'
 import { adminNavItems } from '@/config/navigation'
 import CompanySpotlight from '@/components/company/CompanySpotlight'
 import AdminFAB from '@/components/admin/AdminFAB'
+import { MigrationAlert } from '@/components/shared/MigrationAlert'
 import logoImage from '@/assets/logo/logo.png'
 
 // Theme color for Admin/Gestão environment
@@ -334,6 +335,7 @@ export default function AdminLayout() {
                 </AppShell.Navbar>
 
                 <AppShell.Main>
+                    <MigrationAlert />
                     <Outlet />
                     <AdminFAB />
                 </AppShell.Main>

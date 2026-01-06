@@ -144,3 +144,8 @@ class QuotaExceededError(ApolloException):
             status_code=429,
             details=details,
         )
+
+
+# Alias for backwards compatibility
+TenantNotFoundError = NotFoundError
+

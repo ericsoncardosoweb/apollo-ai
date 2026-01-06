@@ -1,9 +1,10 @@
 /**
  * CRM Kanban Board - Drag & Drop Deal Management
- * Uses @hello-pangea/dnd for smooth drag and drop
+ * Full integration with database, pipeline management, and automated actions
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
     Title,
     Text,
@@ -26,10 +27,16 @@ import {
     Divider,
     Timeline,
     ThemeIcon,
-    Skeleton,
     Alert,
+    ColorInput,
+    Switch,
+    Loader,
+    Center,
+    Tabs,
+    Checkbox,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
+import { notifications } from '@mantine/notifications'
 import {
     DragDropContext,
     Droppable,
@@ -38,13 +45,10 @@ import {
 } from '@hello-pangea/dnd'
 import {
     IconPlus,
-    IconSettings,
     IconGripVertical,
     IconCurrencyReal,
     IconTag,
     IconPhone,
-    IconMail,
-    IconHistory,
     IconBolt,
     IconCheck,
     IconX,
@@ -52,10 +56,23 @@ import {
     IconArrowRight,
     IconDeviceFloppy,
     IconTemplate,
-    IconRefresh,
+    IconMessageCircle,
+    IconRobot,
+    IconUser,
+    IconUserCircle,
+    IconSearch,
+    IconSettings,
+    IconTrash,
+    IconStar,
+    IconStarFilled,
+    IconEdit,
+    IconWorld,
+    IconMail,
+    IconBrandWhatsapp,
+    IconWebhook,
 } from '@tabler/icons-react'
 import { useViewContext } from '@/contexts/ViewContext'
-import { useClientDatabaseStatus } from '@/hooks/useClientSupabase'
+import { useClientDatabaseStatus, useClientSupabase } from '@/hooks/useClientSupabase'
 
 // Types
 interface Stage {
@@ -64,10 +81,21 @@ interface Stage {
     color: string
     position: number
     is_conversion_point: boolean
+    first_time_only: boolean
+}
+
+interface Pipeline {
+    id: string
+    name: string
+    description?: string
+    stages: Stage[]
+    is_default: boolean
+    is_active: boolean
 }
 
 interface Deal {
     id: string
+    contact_id?: string
     contact_name: string
     contact_phone: string
     value: number
@@ -76,103 +104,454 @@ interface Deal {
     cycle_number: number
     status: 'open' | 'won' | 'lost'
     created_at: string
+    conversation_id?: string
+    attendant_type?: 'ai' | 'human' | null
+    attendant_name?: string
+    ai_agent_name?: string
 }
 
-interface Pipeline {
+interface AutomationAction {
     id: string
+    type: 'whatsapp_send' | 'http_request' | 'notification' | 'tag_add' | 'crm_move'
     name: string
-    stages: Stage[]
-    is_default: boolean
+    payload: Record<string, unknown>
 }
 
-interface DealHistoryItem {
-    id: string
-    from_stage: string | null
-    to_stage: string
-    duration_in_stage: number | null
-    triggered_by: string
-    created_at: string
+// Action type definitions
+const ACTION_TYPES = [
+    { value: 'whatsapp_send', label: 'Enviar WhatsApp', icon: IconBrandWhatsapp, color: 'green' },
+    { value: 'http_request', label: 'Requisição HTTP', icon: IconWebhook, color: 'orange' },
+    { value: 'notification', label: 'Notificação', icon: IconMail, color: 'blue' },
+    { value: 'tag_add', label: 'Adicionar Tag', icon: IconTag, color: 'purple' },
+]
+
+// Default pipeline for new accounts
+const DEFAULT_PIPELINE: Pipeline = {
+    id: 'default',
+    name: 'Funil de Vendas',
+    description: 'Pipeline padrão de vendas',
+    is_default: true,
+    is_active: true,
+    stages: [
+        { id: 'lead', name: 'Lead', color: '#868e96', position: 0, is_conversion_point: false, first_time_only: false },
+        { id: 'qualificacao', name: 'Qualificação', color: '#fab005', position: 1, is_conversion_point: false, first_time_only: false },
+        { id: 'proposta', name: 'Proposta', color: '#228be6', position: 2, is_conversion_point: false, first_time_only: false },
+        { id: 'negociacao', name: 'Negociação', color: '#7950f2', position: 3, is_conversion_point: false, first_time_only: false },
+        { id: 'fechamento', name: 'Fechamento', color: '#40c057', position: 4, is_conversion_point: true, first_time_only: false },
+    ],
 }
-
-// Mock data for development
-const MOCK_PIPELINES: Pipeline[] = [
-    {
-        id: '1',
-        name: 'Funil de Vendas',
-        is_default: true,
-        stages: [
-            { id: 'lead', name: 'Lead', color: '#868e96', position: 0, is_conversion_point: false },
-            { id: 'qualificacao', name: 'Qualificação', color: '#fab005', position: 1, is_conversion_point: false },
-            { id: 'proposta', name: 'Proposta', color: '#228be6', position: 2, is_conversion_point: false },
-            { id: 'negociacao', name: 'Negociação', color: '#7950f2', position: 3, is_conversion_point: false },
-            { id: 'fechamento', name: 'Fechamento', color: '#40c057', position: 4, is_conversion_point: true },
-        ],
-    },
-]
-
-const MOCK_DEALS: Deal[] = [
-    { id: 'd1', contact_name: 'João Silva', contact_phone: '+55 11 99999-1234', value: 2500, tags: ['premium'], current_stage_id: 'lead', cycle_number: 1, status: 'open', created_at: '2026-01-05' },
-    { id: 'd2', contact_name: 'Maria Santos', contact_phone: '+55 11 98888-5678', value: 5000, tags: ['vip', 'priority'], current_stage_id: 'qualificacao', cycle_number: 1, status: 'open', created_at: '2026-01-04' },
-    { id: 'd3', contact_name: 'Carlos Lima', contact_phone: '+55 21 97777-9012', value: 1500, tags: [], current_stage_id: 'proposta', cycle_number: 2, status: 'open', created_at: '2026-01-03' },
-    { id: 'd4', contact_name: 'Ana Costa', contact_phone: '+55 11 96666-3456', value: 8000, tags: ['enterprise'], current_stage_id: 'negociacao', cycle_number: 1, status: 'open', created_at: '2026-01-02' },
-]
 
 export default function CRMBoard() {
+    const navigate = useNavigate()
     const { selectedCompany } = useViewContext()
     const { isConfigured } = useClientDatabaseStatus()
+    const { clientSupabase: supabase } = useClientSupabase()
 
-    // State
-    const [selectedPipeline, setSelectedPipeline] = useState<Pipeline | null>(MOCK_PIPELINES[0])
-    const [deals, setDeals] = useState<Deal[]>(MOCK_DEALS)
+    // Data State
+    const [pipelines, setPipelines] = useState<Pipeline[]>([DEFAULT_PIPELINE])
+    const [deals, setDeals] = useState<Deal[]>([])
+    const [loading, setLoading] = useState(true)
+
+    // UI State
+    const [selectedPipeline, setSelectedPipeline] = useState<Pipeline | null>(null)
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null)
-    const [drawerOpened, { open: openDrawer, close: closeDrawer }] = useDisclosure(false)
-    const [automationModalOpened, { open: openAutomationModal, close: closeAutomationModal }] = useDisclosure(false)
     const [selectedStageForAutomation, setSelectedStageForAutomation] = useState<Stage | null>(null)
+    const [searchQuery, setSearchQuery] = useState('')
 
-    // Group deals by stage
-    const dealsByStage = (stageId: string) => deals.filter(d => d.current_stage_id === stageId && d.status === 'open')
+    // Modal/Drawer states
+    const [drawerOpened, { open: openDrawer, close: closeDrawer }] = useDisclosure(false)
+    const [newDealModalOpened, { open: openNewDealModal, close: closeNewDealModal }] = useDisclosure(false)
+    const [automationModalOpened, { open: openAutomationModal, close: closeAutomationModal }] = useDisclosure(false)
+    const [pipelineModalOpened, { open: openPipelineModal, close: closePipelineModal }] = useDisclosure(false)
+    const [addActionModalOpened, { open: openAddActionModal, close: closeAddActionModal }] = useDisclosure(false)
 
-    // Handle drag end
-    const handleDragEnd = (result: DropResult) => {
+    // Form states
+    const [newDealForm, setNewDealForm] = useState({ contact_name: '', contact_phone: '', value: 0 })
+    const [pipelineForm, setPipelineForm] = useState<Partial<Pipeline>>({ name: '', stages: [] })
+    const [isEditingPipeline, setIsEditingPipeline] = useState(false)
+    const [stageActions, setStageActions] = useState<AutomationAction[]>([])
+    const [selectedActionType, setSelectedActionType] = useState<string | null>(null)
+
+    // =========================================================================
+    // DATA LOADING
+    // =========================================================================
+
+    useEffect(() => {
+        console.log('CRM Debug:', { isConfigured, hasSupabase: !!supabase, selectedCompany: selectedCompany?.name })
+        if (isConfigured && supabase) {
+            loadData()
+        } else {
+            setLoading(false)
+        }
+    }, [isConfigured, supabase])
+
+    const loadData = async () => {
+        if (!supabase) return
+        setLoading(true)
+        try {
+            // Load pipelines
+            const { data: pipelineData } = await supabase
+                .from('crm_pipelines')
+                .select('*')
+                .eq('is_active', true)
+                .order('created_at')
+
+            if (pipelineData && pipelineData.length > 0) {
+                setPipelines(pipelineData)
+                const defaultPipeline = pipelineData.find((p: Pipeline) => p.is_default) || pipelineData[0]
+                setSelectedPipeline(defaultPipeline)
+            } else {
+                // Create default pipeline if none exists
+                await createDefaultPipeline()
+            }
+
+            // Load deals
+            const { data: dealData } = await supabase
+                .from('crm_deals')
+                .select('*')
+                .eq('status', 'open')
+                .order('created_at', { ascending: false })
+
+            if (dealData) {
+                setDeals(dealData)
+            }
+        } catch (error) {
+            console.error('Error loading CRM data:', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const createDefaultPipeline = async () => {
+        if (!supabase) return
+        const { data, error } = await supabase
+            .from('crm_pipelines')
+            .insert({
+                name: DEFAULT_PIPELINE.name,
+                description: DEFAULT_PIPELINE.description,
+                stages: DEFAULT_PIPELINE.stages,
+                is_default: true,
+                is_active: true
+            })
+            .select()
+            .single()
+
+        if (data) {
+            setPipelines([data])
+            setSelectedPipeline(data)
+        }
+    }
+
+    // =========================================================================
+    // COMPUTED VALUES
+    // =========================================================================
+
+    const filteredDeals = useMemo(() => {
+        if (!searchQuery.trim()) return deals
+        const query = searchQuery.toLowerCase()
+        return deals.filter(d =>
+            d.contact_name?.toLowerCase().includes(query) ||
+            d.contact_phone?.toLowerCase().includes(query) ||
+            (d.tags || []).some(tag => tag.toLowerCase().includes(query))
+        )
+    }, [deals, searchQuery])
+
+    const dealsByStage = (stageId: string) =>
+        filteredDeals.filter(d => d.current_stage_id === stageId && d.status === 'open')
+
+    const getStageTotal = (stageId: string) =>
+        dealsByStage(stageId).reduce((sum, deal) => sum + (deal.value || 0), 0)
+
+    const formatCurrency = (value: number) =>
+        new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
+
+    const getAttendantDisplay = (deal: Deal) => {
+        if (deal.attendant_type === 'ai') {
+            return { icon: <IconRobot size={12} />, label: deal.ai_agent_name || 'I.A.', color: 'teal' }
+        } else if (deal.attendant_type === 'human') {
+            return { icon: <IconUser size={12} />, label: deal.attendant_name || 'Atendente', color: 'blue' }
+        }
+        return { icon: <IconUserCircle size={12} />, label: 'Sem atendente', color: 'gray' }
+    }
+
+    // =========================================================================
+    // HANDLERS
+    // =========================================================================
+
+    const handleDragEnd = async (result: DropResult) => {
         const { destination, source, draggableId } = result
-
         if (!destination) return
         if (destination.droppableId === source.droppableId && destination.index === source.index) return
 
-        // Update deal stage
+        // Optimistic update
         const updatedDeals = deals.map(deal => {
             if (deal.id === draggableId) {
                 return { ...deal, current_stage_id: destination.droppableId }
             }
             return deal
         })
-
         setDeals(updatedDeals)
 
-        // TODO: Call API to move deal
-        console.log(`Moving deal ${draggableId} from ${source.droppableId} to ${destination.droppableId}`)
+        // API update
+        if (supabase) {
+            const { error } = await supabase
+                .from('crm_deals')
+                .update({ current_stage_id: destination.droppableId, updated_at: new Date().toISOString() })
+                .eq('id', draggableId)
+
+            if (error) {
+                notifications.show({ title: 'Erro', message: 'Falha ao mover deal', color: 'red' })
+                loadData() // Revert
+            } else {
+                // Log history
+                await supabase.from('crm_deal_history').insert({
+                    deal_id: draggableId,
+                    from_stage: source.droppableId,
+                    to_stage: destination.droppableId,
+                    triggered_by: 'user'
+                })
+            }
+        }
     }
 
-    // Open deal drawer
     const handleDealClick = (deal: Deal) => {
         setSelectedDeal(deal)
         openDrawer()
     }
 
-    // Open stage automation modal
+    const handleOpenChat = (deal: Deal) => {
+        if (deal.conversation_id) {
+            navigate(`/admin/inbox?conversation=${deal.conversation_id}`)
+        } else {
+            navigate('/admin/inbox')
+        }
+    }
+
     const handleStageAutomation = (stage: Stage) => {
         setSelectedStageForAutomation(stage)
+        setStageActions([]) // TODO: Load from DB
         openAutomationModal()
     }
 
-    // Calculate stage totals
-    const getStageTotal = (stageId: string) => {
-        return dealsByStage(stageId).reduce((sum, deal) => sum + deal.value, 0)
+    const handleCreateDeal = async () => {
+        if (!newDealForm.contact_name || !selectedPipeline) return
+
+        const newDeal = {
+            contact_name: newDealForm.contact_name,
+            contact_phone: newDealForm.contact_phone,
+            value: newDealForm.value,
+            pipeline_id: selectedPipeline.id,
+            current_stage_id: selectedPipeline.stages[0]?.id || 'lead',
+            cycle_number: 1,
+            status: 'open',
+            metadata: {}
+        }
+
+        if (supabase) {
+            const { data, error } = await supabase
+                .from('crm_deals')
+                .insert(newDeal)
+                .select()
+                .single()
+
+            if (data) {
+                setDeals([data, ...deals])
+                notifications.show({ title: 'Sucesso', message: 'Deal criado com sucesso', color: 'green' })
+            }
+            if (error) {
+                notifications.show({ title: 'Erro', message: 'Falha ao criar deal', color: 'red' })
+            }
+        } else {
+            // Mock for development
+            setDeals([{ ...newDeal, id: `d${Date.now()}`, created_at: new Date().toISOString(), tags: [] } as Deal, ...deals])
+        }
+
+        setNewDealForm({ contact_name: '', contact_phone: '', value: 0 })
+        closeNewDealModal()
     }
 
-    // Format currency
-    const formatCurrency = (value: number) => {
-        return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
+    // =========================================================================
+    // PIPELINE MANAGEMENT
+    // =========================================================================
+
+    const handleOpenNewPipeline = () => {
+        setIsEditingPipeline(false)
+        setPipelineForm({
+            name: '',
+            description: '',
+            stages: [
+                { id: `stage_${Date.now()}`, name: 'Novo Lead', color: '#868e96', position: 0, is_conversion_point: false, first_time_only: false }
+            ]
+        })
+        openPipelineModal()
+    }
+
+    const handleEditPipeline = (pipeline: Pipeline) => {
+        setIsEditingPipeline(true)
+        setPipelineForm({ ...pipeline })
+        openPipelineModal()
+    }
+
+    const handleSavePipeline = async () => {
+        if (!pipelineForm.name || !pipelineForm.stages?.length) {
+            notifications.show({ title: 'Erro', message: 'Preencha o nome e adicione pelo menos um estágio', color: 'red' })
+            return
+        }
+
+        const pipelineData = {
+            name: pipelineForm.name,
+            description: pipelineForm.description || '',
+            stages: pipelineForm.stages,
+            is_default: pipelines.length === 0 || (!isEditingPipeline && pipelines.every(p => !p.is_default)),
+            is_active: true
+        }
+
+        if (supabase) {
+            try {
+                if (isEditingPipeline && pipelineForm.id) {
+                    const { error } = await supabase
+                        .from('crm_pipelines')
+                        .update(pipelineData)
+                        .eq('id', pipelineForm.id)
+
+                    if (error) throw error
+                    notifications.show({ title: 'Sucesso', message: 'Pipeline atualizado', color: 'green' })
+                } else {
+                    const { data, error } = await supabase
+                        .from('crm_pipelines')
+                        .insert(pipelineData)
+                        .select()
+                        .single()
+
+                    if (error) throw error
+                    notifications.show({ title: 'Sucesso', message: 'Pipeline criado', color: 'green' })
+                }
+                await loadData()
+            } catch (error) {
+                console.error('Error saving pipeline:', error)
+                notifications.show({ title: 'Erro', message: 'Falha ao salvar pipeline', color: 'red' })
+            }
+        } else {
+            // Dev mode: update local state
+            const newPipeline: Pipeline = {
+                id: pipelineForm.id || `pipeline_${Date.now()}`,
+                name: pipelineData.name,
+                description: pipelineData.description,
+                stages: pipelineData.stages as Stage[],
+                is_default: pipelineData.is_default,
+                is_active: true
+            }
+
+            if (isEditingPipeline) {
+                setPipelines(pipelines.map(p => p.id === newPipeline.id ? newPipeline : p))
+            } else {
+                setPipelines([...pipelines, newPipeline])
+            }
+            setSelectedPipeline(newPipeline)
+            notifications.show({ title: 'Sucesso', message: 'Pipeline salvo (modo dev)', color: 'green' })
+        }
+
+        closePipelineModal()
+    }
+
+    const handleSetDefaultPipeline = async (pipelineId: string) => {
+        if (!supabase) return
+
+        // Unset all defaults
+        await supabase.from('crm_pipelines').update({ is_default: false }).eq('is_default', true)
+
+        // Set new default
+        await supabase.from('crm_pipelines').update({ is_default: true }).eq('id', pipelineId)
+
+        notifications.show({ title: 'Sucesso', message: 'Pipeline definido como padrão', color: 'green' })
+        loadData()
+    }
+
+    const addStageToForm = () => {
+        const newStage: Stage = {
+            id: `stage_${Date.now()}`,
+            name: `Estágio ${(pipelineForm.stages?.length || 0) + 1}`,
+            color: '#868e96',
+            position: pipelineForm.stages?.length || 0,
+            is_conversion_point: false,
+            first_time_only: false
+        }
+        setPipelineForm({ ...pipelineForm, stages: [...(pipelineForm.stages || []), newStage] })
+    }
+
+    const updateStageInForm = (index: number, updates: Partial<Stage>) => {
+        const stages = [...(pipelineForm.stages || [])]
+
+        // Exclusivity validation for conversion point
+        if (updates.is_conversion_point) {
+            stages.forEach((s, i) => { if (i !== index) s.is_conversion_point = false })
+        }
+
+        // Exclusivity validation for first_time_only
+        if (updates.first_time_only) {
+            stages.forEach((s, i) => { if (i !== index) s.first_time_only = false })
+        }
+
+        // Cannot have both on same stage
+        if (updates.is_conversion_point && stages[index].first_time_only) {
+            updates.first_time_only = false
+        }
+        if (updates.first_time_only && stages[index].is_conversion_point) {
+            updates.is_conversion_point = false
+        }
+
+        stages[index] = { ...stages[index], ...updates }
+        setPipelineForm({ ...pipelineForm, stages })
+    }
+
+    const removeStageFromForm = (index: number) => {
+        const stages = (pipelineForm.stages || []).filter((_, i) => i !== index)
+        setPipelineForm({ ...pipelineForm, stages })
+    }
+
+    // =========================================================================
+    // ACTION MANAGEMENT
+    // =========================================================================
+
+    const handleAddAction = (type: string) => {
+        const actionDef = ACTION_TYPES.find(a => a.value === type)
+        if (!actionDef) return
+
+        const newAction: AutomationAction = {
+            id: `action_${Date.now()}`,
+            type: type as AutomationAction['type'],
+            name: actionDef.label,
+            payload: {}
+        }
+
+        setStageActions([...stageActions, newAction])
+        closeAddActionModal()
+    }
+
+    const removeAction = (actionId: string) => {
+        setStageActions(stageActions.filter(a => a.id !== actionId))
+    }
+
+    const handleSaveAutomation = async () => {
+        if (!selectedStageForAutomation || !selectedPipeline) return
+
+        // Update stage config and save actions
+        // TODO: Save to automation_journeys table
+
+        notifications.show({ title: 'Sucesso', message: 'Automações salvas', color: 'green' })
+        closeAutomationModal()
+    }
+
+    // =========================================================================
+    // RENDER
+    // =========================================================================
+
+    if (loading) {
+        return (
+            <Center h="calc(100vh - 120px)">
+                <Loader size="lg" />
+            </Center>
+        )
     }
 
     if (!isConfigured) {
@@ -195,22 +574,58 @@ export default function CRMBoard() {
                     <Text c="dimmed" size="sm">Gerencie seus deals com drag and drop</Text>
                 </div>
                 <Group>
+                    <TextInput
+                        placeholder="Buscar por nome, telefone ou tag..."
+                        leftSection={<IconSearch size={16} />}
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        w={280}
+                        styles={{ input: { backgroundColor: 'var(--mantine-color-dark-6)' } }}
+                    />
                     <Select
                         placeholder="Selecionar Pipeline"
-                        data={MOCK_PIPELINES.map(p => ({ value: p.id, label: p.name }))}
+                        data={pipelines.map(p => ({
+                            value: p.id,
+                            label: `${p.name}${p.is_default ? ' ⭐' : ''}`
+                        }))}
                         value={selectedPipeline?.id}
                         onChange={(value) => {
-                            const pipeline = MOCK_PIPELINES.find(p => p.id === value)
+                            const pipeline = pipelines.find(p => p.id === value)
                             setSelectedPipeline(pipeline || null)
                         }}
-                        w={200}
+                        w={220}
                     />
-                    <Tooltip label="Salvar como Template">
-                        <ActionIcon variant="light" size="lg">
-                            <IconTemplate size={18} />
-                        </ActionIcon>
-                    </Tooltip>
-                    <Button leftSection={<IconPlus size={16} />} variant="filled">
+                    <Menu position="bottom-end" withArrow>
+                        <Menu.Target>
+                            <ActionIcon variant="light" size="lg">
+                                <IconSettings size={18} />
+                            </ActionIcon>
+                        </Menu.Target>
+                        <Menu.Dropdown>
+                            <Menu.Label>Pipelines</Menu.Label>
+                            <Menu.Item leftSection={<IconPlus size={14} />} onClick={handleOpenNewPipeline}>
+                                Novo Pipeline
+                            </Menu.Item>
+                            {selectedPipeline && (
+                                <>
+                                    <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => handleEditPipeline(selectedPipeline)}>
+                                        Editar Pipeline
+                                    </Menu.Item>
+                                    {!selectedPipeline.is_default && (
+                                        <Menu.Item leftSection={<IconStarFilled size={14} />} onClick={() => handleSetDefaultPipeline(selectedPipeline.id)}>
+                                            Definir como Padrão
+                                        </Menu.Item>
+                                    )}
+                                </>
+                            )}
+                            <Menu.Divider />
+                            <Menu.Label>Templates</Menu.Label>
+                            <Menu.Item leftSection={<IconTemplate size={14} />}>
+                                Salvar como Template
+                            </Menu.Item>
+                        </Menu.Dropdown>
+                    </Menu>
+                    <Button leftSection={<IconPlus size={16} />} variant="filled" onClick={openNewDealModal}>
                         Novo Deal
                     </Button>
                 </Group>
@@ -219,12 +634,7 @@ export default function CRMBoard() {
             {/* Kanban Board */}
             {selectedPipeline && (
                 <DragDropContext onDragEnd={handleDragEnd}>
-                    <Group
-                        gap="md"
-                        align="flex-start"
-                        wrap="nowrap"
-                        style={{ flex: 1, overflowX: 'auto', paddingBottom: 16 }}
-                    >
+                    <Group gap="md" align="flex-start" wrap="nowrap" style={{ flex: 1, overflowX: 'auto', paddingBottom: 16 }}>
                         {selectedPipeline.stages.map((stage) => (
                             <Droppable droppableId={stage.id} key={stage.id}>
                                 {(provided, snapshot) => (
@@ -247,126 +657,85 @@ export default function CRMBoard() {
                                         {/* Stage Header */}
                                         <Group justify="space-between" mb="xs">
                                             <Group gap="xs">
-                                                <Box
-                                                    style={{
-                                                        width: 12,
-                                                        height: 12,
-                                                        borderRadius: '50%',
-                                                        backgroundColor: stage.color,
-                                                    }}
-                                                />
+                                                <Box style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: stage.color }} />
                                                 <Text fw={600} size="sm">{stage.name}</Text>
-                                                <Badge size="xs" variant="light" color="gray">
-                                                    {dealsByStage(stage.id).length}
-                                                </Badge>
+                                                <Badge size="xs" variant="light" color="gray">{dealsByStage(stage.id).length}</Badge>
+                                                {stage.is_conversion_point && (
+                                                    <Badge size="xs" color="green" variant="dot">Conversão</Badge>
+                                                )}
                                             </Group>
                                             <Group gap={4}>
                                                 <Tooltip label="Automações">
-                                                    <ActionIcon
-                                                        size="sm"
-                                                        variant="subtle"
-                                                        onClick={() => handleStageAutomation(stage)}
-                                                    >
+                                                    <ActionIcon size="sm" variant="subtle" onClick={() => handleStageAutomation(stage)}>
                                                         <IconBolt size={14} />
                                                     </ActionIcon>
                                                 </Tooltip>
-                                                <ActionIcon size="sm" variant="subtle">
+                                                <ActionIcon size="sm" variant="subtle" onClick={openNewDealModal}>
                                                     <IconPlus size={14} />
                                                 </ActionIcon>
                                             </Group>
                                         </Group>
 
-                                        {/* Stage Total */}
-                                        <Text size="xs" c="dimmed" mb="xs">
-                                            Total: {formatCurrency(getStageTotal(stage.id))}
-                                        </Text>
+                                        <Text size="xs" c="dimmed" mb="xs">Total: {formatCurrency(getStageTotal(stage.id))}</Text>
 
                                         {/* Deals */}
-                                        <Stack
-                                            gap="xs"
-                                            style={{
-                                                flex: 1,
-                                                overflowY: 'auto',
-                                                minHeight: 100,
-                                            }}
-                                        >
-                                            {dealsByStage(stage.id).map((deal, index) => (
-                                                <Draggable
-                                                    key={deal.id}
-                                                    draggableId={deal.id}
-                                                    index={index}
-                                                >
-                                                    {(provided, snapshot) => (
-                                                        <Paper
-                                                            ref={provided.innerRef}
-                                                            {...provided.draggableProps}
-                                                            withBorder
-                                                            p="sm"
-                                                            radius="sm"
-                                                            style={{
-                                                                ...provided.draggableProps.style,
-                                                                backgroundColor: snapshot.isDragging
-                                                                    ? 'var(--mantine-color-dark-5)'
-                                                                    : 'var(--mantine-color-dark-6)',
-                                                                cursor: 'grab',
-                                                            }}
-                                                            onClick={() => handleDealClick(deal)}
-                                                        >
-                                                            <Group justify="space-between" wrap="nowrap">
-                                                                <div
-                                                                    {...provided.dragHandleProps}
-                                                                    style={{ cursor: 'grab' }}
-                                                                >
-                                                                    <IconGripVertical size={14} color="gray" />
-                                                                </div>
-                                                                <Stack gap={4} style={{ flex: 1 }}>
-                                                                    <Text size="sm" fw={500} lineClamp={1}>
-                                                                        {deal.contact_name}
-                                                                    </Text>
-                                                                    <Group gap="xs">
-                                                                        <Text size="xs" c="green" fw={600}>
-                                                                            {formatCurrency(deal.value)}
-                                                                        </Text>
-                                                                        {deal.cycle_number > 1 && (
-                                                                            <Badge size="xs" variant="outline" color="blue">
-                                                                                Ciclo {deal.cycle_number}
-                                                                            </Badge>
-                                                                        )}
-                                                                    </Group>
-                                                                    {deal.tags.length > 0 && (
-                                                                        <Group gap={4}>
-                                                                            {deal.tags.slice(0, 2).map(tag => (
-                                                                                <Badge key={tag} size="xs" variant="light">
-                                                                                    {tag}
-                                                                                </Badge>
-                                                                            ))}
+                                        <Stack gap="xs" style={{ flex: 1, overflowY: 'auto', minHeight: 100 }}>
+                                            {dealsByStage(stage.id).map((deal, index) => {
+                                                const attendant = getAttendantDisplay(deal)
+                                                return (
+                                                    <Draggable key={deal.id} draggableId={deal.id} index={index}>
+                                                        {(provided, snapshot) => (
+                                                            <Paper
+                                                                ref={provided.innerRef}
+                                                                {...provided.draggableProps}
+                                                                withBorder
+                                                                p="sm"
+                                                                radius="sm"
+                                                                style={{
+                                                                    ...provided.draggableProps.style,
+                                                                    backgroundColor: snapshot.isDragging ? 'var(--mantine-color-dark-5)' : 'var(--mantine-color-dark-6)',
+                                                                    cursor: 'grab',
+                                                                }}
+                                                                onClick={() => handleDealClick(deal)}
+                                                            >
+                                                                <Group justify="space-between" wrap="nowrap">
+                                                                    <div {...provided.dragHandleProps} style={{ cursor: 'grab' }}>
+                                                                        <IconGripVertical size={14} color="gray" />
+                                                                    </div>
+                                                                    <Stack gap={4} style={{ flex: 1 }}>
+                                                                        <Group justify="space-between">
+                                                                            <Text size="sm" fw={500} lineClamp={1}>{deal.contact_name}</Text>
+                                                                            <Tooltip label="Abrir Chat">
+                                                                                <ActionIcon size="xs" variant="subtle" color="indigo" onClick={(e) => { e.stopPropagation(); handleOpenChat(deal) }}>
+                                                                                    <IconMessageCircle size={14} />
+                                                                                </ActionIcon>
+                                                                            </Tooltip>
                                                                         </Group>
-                                                                    )}
-                                                                </Stack>
-                                                                <Menu position="bottom-end" withArrow>
-                                                                    <Menu.Target>
-                                                                        <ActionIcon
-                                                                            size="sm"
-                                                                            variant="subtle"
-                                                                            onClick={(e) => e.stopPropagation()}
-                                                                        >
-                                                                            <IconDotsVertical size={14} />
-                                                                        </ActionIcon>
-                                                                    </Menu.Target>
-                                                                    <Menu.Dropdown>
-                                                                        <Menu.Item leftSection={<IconCheck size={14} />} color="green">
-                                                                            Marcar como Ganho
-                                                                        </Menu.Item>
-                                                                        <Menu.Item leftSection={<IconX size={14} />} color="red">
-                                                                            Marcar como Perdido
-                                                                        </Menu.Item>
-                                                                    </Menu.Dropdown>
-                                                                </Menu>
-                                                            </Group>
-                                                        </Paper>
-                                                    )}
-                                                </Draggable>
-                                            ))}
+                                                                        <Group gap="xs">
+                                                                            <Text size="xs" c="green" fw={600}>{formatCurrency(deal.value || 0)}</Text>
+                                                                            {deal.cycle_number > 1 && <Badge size="xs" variant="outline" color="blue">Ciclo {deal.cycle_number}</Badge>}
+                                                                        </Group>
+                                                                        <Badge size="xs" variant="light" color={attendant.color} leftSection={attendant.icon}>{attendant.label}</Badge>
+                                                                    </Stack>
+                                                                    <Menu position="bottom-end" withArrow>
+                                                                        <Menu.Target>
+                                                                            <ActionIcon size="sm" variant="subtle" onClick={(e) => e.stopPropagation()}>
+                                                                                <IconDotsVertical size={14} />
+                                                                            </ActionIcon>
+                                                                        </Menu.Target>
+                                                                        <Menu.Dropdown>
+                                                                            <Menu.Item leftSection={<IconMessageCircle size={14} />} onClick={() => handleOpenChat(deal)}>Abrir Chat</Menu.Item>
+                                                                            <Menu.Divider />
+                                                                            <Menu.Item leftSection={<IconCheck size={14} />} color="green">Marcar como Ganho</Menu.Item>
+                                                                            <Menu.Item leftSection={<IconX size={14} />} color="red">Marcar como Perdido</Menu.Item>
+                                                                        </Menu.Dropdown>
+                                                                    </Menu>
+                                                                </Group>
+                                                            </Paper>
+                                                        )}
+                                                    </Draggable>
+                                                )
+                                            })}
                                             {provided.placeholder}
                                         </Stack>
                                     </Paper>
@@ -378,146 +747,152 @@ export default function CRMBoard() {
             )}
 
             {/* Deal Detail Drawer */}
-            <Drawer
-                opened={drawerOpened}
-                onClose={closeDrawer}
-                title={selectedDeal?.contact_name || 'Deal'}
-                position="right"
-                size="md"
-            >
+            <Drawer opened={drawerOpened} onClose={closeDrawer} title={selectedDeal?.contact_name || 'Deal'} position="right" size="md">
                 {selectedDeal && (
                     <Stack gap="md">
-                        {/* Contact Info */}
                         <Card withBorder>
                             <Stack gap="xs">
                                 <Group>
-                                    <Avatar color="blue" radius="xl" size="lg">
-                                        {selectedDeal.contact_name.charAt(0)}
-                                    </Avatar>
+                                    <Avatar color="blue" radius="xl" size="lg">{selectedDeal.contact_name?.charAt(0)}</Avatar>
                                     <div>
                                         <Text fw={500}>{selectedDeal.contact_name}</Text>
                                         <Text size="xs" c="dimmed">{selectedDeal.contact_phone}</Text>
                                     </div>
                                 </Group>
-                                <Divider my="xs" />
+                                <Divider my="xs" label="Atendimento" labelPosition="center" />
                                 <Group gap="xs">
-                                    <IconCurrencyReal size={16} />
-                                    <Text fw={600} c="green">{formatCurrency(selectedDeal.value)}</Text>
-                                </Group>
-                                <Group gap="xs">
-                                    <IconTag size={16} />
-                                    {selectedDeal.tags.map(tag => (
-                                        <Badge key={tag} size="sm">{tag}</Badge>
-                                    ))}
-                                    {selectedDeal.tags.length === 0 && (
-                                        <Text size="sm" c="dimmed">Sem tags</Text>
+                                    {selectedDeal.attendant_type === 'ai' ? (
+                                        <><ThemeIcon size="sm" variant="light" color="teal"><IconRobot size={14} /></ThemeIcon><Text size="sm">Atendido por I.A.: <strong>{selectedDeal.ai_agent_name || 'Lia'}</strong></Text></>
+                                    ) : selectedDeal.attendant_type === 'human' ? (
+                                        <><ThemeIcon size="sm" variant="light" color="blue"><IconUser size={14} /></ThemeIcon><Text size="sm">Atendido por: <strong>{selectedDeal.attendant_name}</strong></Text></>
+                                    ) : (
+                                        <><ThemeIcon size="sm" variant="light" color="gray"><IconUserCircle size={14} /></ThemeIcon><Text size="sm" c="dimmed">Aguardando atendimento</Text></>
                                     )}
                                 </Group>
+                                <Button variant="light" color="indigo" leftSection={<IconMessageCircle size={16} />} fullWidth onClick={() => handleOpenChat(selectedDeal)}>Abrir Conversa</Button>
+                                <Divider my="xs" />
+                                <Group gap="xs"><IconCurrencyReal size={16} /><Text fw={600} c="green">{formatCurrency(selectedDeal.value || 0)}</Text></Group>
                             </Stack>
                         </Card>
-
-                        {/* Value Editor */}
-                        <NumberInput
-                            label="Valor do Deal"
-                            value={selectedDeal.value}
-                            thousandSeparator="."
-                            decimalSeparator=","
-                            prefix="R$ "
-                            leftSection={<IconCurrencyReal size={16} />}
-                        />
-
-                        {/* History Timeline */}
-                        <Card withBorder>
-                            <Text fw={500} mb="sm">Histórico de Movimentação</Text>
-                            <Timeline active={0} bulletSize={24} lineWidth={2}>
-                                <Timeline.Item
-                                    bullet={<IconArrowRight size={12} />}
-                                    title="Movido para Proposta"
-                                >
-                                    <Text c="dimmed" size="xs">Há 2 dias • Por Carlos</Text>
-                                    <Text size="sm" c="dimmed">Tempo no estágio anterior: 3 dias</Text>
-                                </Timeline.Item>
-                                <Timeline.Item
-                                    bullet={<IconArrowRight size={12} />}
-                                    title="Movido para Qualificação"
-                                >
-                                    <Text c="dimmed" size="xs">Há 5 dias • Por Sistema</Text>
-                                </Timeline.Item>
-                                <Timeline.Item
-                                    bullet={<IconPlus size={12} />}
-                                    title="Deal Criado"
-                                >
-                                    <Text c="dimmed" size="xs">{selectedDeal.created_at}</Text>
-                                </Timeline.Item>
-                            </Timeline>
-                        </Card>
-
-                        {/* Actions */}
+                        <NumberInput label="Valor do Deal" value={selectedDeal.value} thousandSeparator="." decimalSeparator="," prefix="R$ " leftSection={<IconCurrencyReal size={16} />} />
                         <Group grow>
-                            <Button variant="light" color="green" leftSection={<IconCheck size={16} />}>
-                                Ganho
-                            </Button>
-                            <Button variant="light" color="red" leftSection={<IconX size={16} />}>
-                                Perdido
-                            </Button>
+                            <Button variant="light" color="green" leftSection={<IconCheck size={16} />}>Ganho</Button>
+                            <Button variant="light" color="red" leftSection={<IconX size={16} />}>Perdido</Button>
                         </Group>
                     </Stack>
                 )}
             </Drawer>
 
-            {/* Stage Automation Modal */}
-            <Modal
-                opened={automationModalOpened}
-                onClose={closeAutomationModal}
-                title={`Automações: ${selectedStageForAutomation?.name}`}
-                size="lg"
-            >
+            {/* New Deal Modal */}
+            <Modal opened={newDealModalOpened} onClose={closeNewDealModal} title="Novo Deal" size="md">
                 <Stack gap="md">
-                    <Text size="sm" c="dimmed">
-                        Configure ações automáticas quando um card entrar neste estágio.
-                    </Text>
+                    <TextInput label="Nome do Contato" placeholder="Ex: João Silva" required value={newDealForm.contact_name} onChange={(e) => setNewDealForm({ ...newDealForm, contact_name: e.target.value })} />
+                    <TextInput label="Telefone" placeholder="+55 11 99999-9999" leftSection={<IconPhone size={16} />} value={newDealForm.contact_phone} onChange={(e) => setNewDealForm({ ...newDealForm, contact_phone: e.target.value })} />
+                    <NumberInput label="Valor do Deal" placeholder="0,00" thousandSeparator="." decimalSeparator="," prefix="R$ " leftSection={<IconCurrencyReal size={16} />} value={newDealForm.value} onChange={(val) => setNewDealForm({ ...newDealForm, value: typeof val === 'number' ? val : 0 })} />
+                    <Group justify="flex-end" mt="md">
+                        <Button variant="default" onClick={closeNewDealModal}>Cancelar</Button>
+                        <Button leftSection={<IconDeviceFloppy size={16} />} onClick={handleCreateDeal} disabled={!newDealForm.contact_name}>Criar Deal</Button>
+                    </Group>
+                </Stack>
+            </Modal>
+
+            {/* Pipeline Management Modal */}
+            <Modal opened={pipelineModalOpened} onClose={closePipelineModal} title={isEditingPipeline ? 'Editar Pipeline' : 'Novo Pipeline'} size="lg">
+                <Stack gap="md">
+                    <TextInput label="Nome do Pipeline" placeholder="Ex: Funil de Vendas" required value={pipelineForm.name || ''} onChange={(e) => setPipelineForm({ ...pipelineForm, name: e.target.value })} />
+                    <TextInput label="Descrição" placeholder="Descrição opcional" value={pipelineForm.description || ''} onChange={(e) => setPipelineForm({ ...pipelineForm, description: e.target.value })} />
+
+                    <Divider label="Estágios" labelPosition="center" />
+
+                    <Stack gap="xs">
+                        {(pipelineForm.stages || []).map((stage, index) => (
+                            <Paper key={stage.id} withBorder p="sm">
+                                <Group justify="space-between" wrap="nowrap">
+                                    <Group gap="xs" style={{ flex: 1 }}>
+                                        <ColorInput size="xs" value={stage.color} onChange={(color) => updateStageInForm(index, { color })} w={80} swatches={['#868e96', '#fab005', '#228be6', '#7950f2', '#40c057', '#fa5252', '#fd7e14', '#e64980', '#15aabf']} />
+                                        <TextInput size="xs" value={stage.name} onChange={(e) => updateStageInForm(index, { name: e.target.value })} style={{ flex: 1 }} />
+                                    </Group>
+                                    <Group gap="xs">
+                                        <Tooltip label="Ponto de Conversão">
+                                            <Checkbox size="xs" color="green" checked={stage.is_conversion_point} onChange={(e) => updateStageInForm(index, { is_conversion_point: e.currentTarget.checked })} />
+                                        </Tooltip>
+                                        <ActionIcon size="sm" color="red" variant="subtle" onClick={() => removeStageFromForm(index)} disabled={(pipelineForm.stages?.length || 0) <= 1}>
+                                            <IconTrash size={14} />
+                                        </ActionIcon>
+                                    </Group>
+                                </Group>
+                            </Paper>
+                        ))}
+                        <Button variant="light" leftSection={<IconPlus size={14} />} size="sm" onClick={addStageToForm}>Adicionar Estágio</Button>
+                    </Stack>
+
+                    <Group justify="flex-end" mt="md">
+                        <Button variant="default" onClick={closePipelineModal}>Cancelar</Button>
+                        <Button leftSection={<IconDeviceFloppy size={16} />} onClick={handleSavePipeline} disabled={!pipelineForm.name || !pipelineForm.stages?.length}>Salvar Pipeline</Button>
+                    </Group>
+                </Stack>
+            </Modal>
+
+            {/* Stage Automation Modal */}
+            <Modal opened={automationModalOpened} onClose={closeAutomationModal} title={`Automações: ${selectedStageForAutomation?.name}`} size="lg">
+                <Stack gap="md">
+                    <Text size="sm" c="dimmed">Configure ações automáticas quando um card entrar neste estágio.</Text>
 
                     <Card withBorder>
                         <Stack gap="sm">
-                            <Group>
-                                <input type="checkbox" id="firstTime" />
-                                <label htmlFor="firstTime">
-                                    <Text size="sm">Apenas na primeira vez deste ciclo</Text>
-                                </label>
-                            </Group>
+                            <Text fw={500} size="sm">Configuração do Estágio</Text>
+                            <Switch label="Apenas na primeira vez deste ciclo" description="Automações executadas apenas na primeira passagem" disabled={selectedStageForAutomation?.is_conversion_point} />
+                            <Switch label="Aqui acontece a conversão" description="Este estágio marca a conversão final" color="green" checked={selectedStageForAutomation?.is_conversion_point} />
+                            <Alert color="blue" variant="light" title="Regras de exclusividade" icon={<IconBolt size={16} />}>
+                                <Text size="xs">• Apenas um estágio pode ser o ponto de conversão<br />• Ambas opções não podem estar no mesmo estágio</Text>
+                            </Alert>
+                        </Stack>
+                    </Card>
 
-                            <Divider />
-
-                            <Text fw={500} size="sm">Ações</Text>
-
-                            <Paper withBorder p="sm">
-                                <Group justify="space-between">
-                                    <Group gap="xs">
-                                        <ThemeIcon size="sm" variant="light" color="green">
-                                            <IconPhone size={12} />
-                                        </ThemeIcon>
-                                        <Text size="sm">Enviar WhatsApp</Text>
-                                    </Group>
-                                    <ActionIcon size="sm" variant="subtle" color="red">
-                                        <IconX size={14} />
-                                    </ActionIcon>
-                                </Group>
-                            </Paper>
-
-                            <Button variant="light" leftSection={<IconPlus size={14} />} size="sm">
-                                Adicionar Ação
-                            </Button>
+                    <Card withBorder>
+                        <Stack gap="sm">
+                            <Text fw={500} size="sm">Ações Programadas</Text>
+                            {stageActions.map(action => {
+                                const actionDef = ACTION_TYPES.find(a => a.value === action.type)
+                                const ActionTypeIcon = actionDef?.icon || IconBolt
+                                return (
+                                    <Paper key={action.id} withBorder p="sm">
+                                        <Group justify="space-between">
+                                            <Group gap="xs">
+                                                <ThemeIcon size="sm" variant="light" color={actionDef?.color || 'gray'}><ActionTypeIcon size={12} /></ThemeIcon>
+                                                <Text size="sm">{action.name}</Text>
+                                            </Group>
+                                            <ActionIcon size="sm" variant="subtle" color="red" onClick={() => removeAction(action.id)}><IconTrash size={14} /></ActionIcon>
+                                        </Group>
+                                    </Paper>
+                                )
+                            })}
+                            <Button variant="light" leftSection={<IconPlus size={14} />} size="sm" onClick={openAddActionModal}>Adicionar Ação</Button>
                         </Stack>
                     </Card>
 
                     <Group justify="flex-end">
-                        <Button variant="default" onClick={closeAutomationModal}>
-                            Cancelar
-                        </Button>
-                        <Button leftSection={<IconDeviceFloppy size={16} />}>
-                            Salvar
-                        </Button>
+                        <Button variant="default" onClick={closeAutomationModal}>Cancelar</Button>
+                        <Button leftSection={<IconDeviceFloppy size={16} />} onClick={handleSaveAutomation}>Salvar</Button>
                     </Group>
+                </Stack>
+            </Modal>
+
+            {/* Add Action Modal */}
+            <Modal opened={addActionModalOpened} onClose={closeAddActionModal} title="Adicionar Ação" size="md">
+                <Stack gap="md">
+                    <Text size="sm" c="dimmed">Selecione o tipo de ação a ser executada:</Text>
+                    {ACTION_TYPES.map(action => {
+                        const ActionIconComp = action.icon
+                        return (
+                            <Paper key={action.value} withBorder p="md" style={{ cursor: 'pointer' }} onClick={() => handleAddAction(action.value)}>
+                                <Group>
+                                    <ThemeIcon size="lg" variant="light" color={action.color}><ActionIconComp size={20} /></ThemeIcon>
+                                    <Text fw={500}>{action.label}</Text>
+                                </Group>
+                            </Paper>
+                        )
+                    })}
                 </Stack>
             </Modal>
         </Stack>

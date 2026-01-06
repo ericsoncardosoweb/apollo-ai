@@ -7,7 +7,6 @@ Uses Pydantic Settings for type-safe configuration management.
 from functools import lru_cache
 from typing import List
 
-from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,14 +31,24 @@ class Settings(BaseSettings):
     # API
     # ===========================================
     api_prefix: str = "/api/v1"
-    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:5173"]
+    cors_origins_raw: str = "*"  # Raw string, parsed by property
     
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v: str | List[str]) -> List[str]:
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
-        return v
+    @property
+    def cors_origins(self) -> List[str]:
+        """Parse CORS origins from raw string."""
+        v = self.cors_origins_raw
+        if not v or not v.strip():
+            return ["*"]
+        # Try JSON parse first
+        if v.startswith("["):
+            import json
+            try:
+                return json.loads(v)
+            except Exception:
+                pass
+        # Fall back to comma-separated
+        return [origin.strip() for origin in v.split(",") if origin.strip()]
+
 
     # ===========================================
     # Supabase
