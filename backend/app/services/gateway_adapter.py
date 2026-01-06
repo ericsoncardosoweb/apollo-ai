@@ -22,6 +22,7 @@ from app.schemas.whatsapp import (
     EvolutionWebhookPayload,
     ZAPIWebhookPayload,
     MetaCloudWebhookPayload,
+    UAZAPIWebhookPayload,
 )
 
 logger = structlog.get_logger()
@@ -128,6 +129,64 @@ class MetaCloudAdapter(BaseGatewayAdapter):
             return []
 
 
+class UAZAPIAdapter(BaseGatewayAdapter):
+    """Adapter for UAZAPI (Brazilian WhatsApp API)"""
+    
+    provider = GatewayProvider.UAZAPI
+    
+    def validate_payload(self, payload: dict) -> bool:
+        """
+        Check if payload matches UAZAPI format.
+        UAZAPI can send different structures:
+        - With 'event' field for event type
+        - With 'instanceId' or 'instance' for instance identification
+        - Direct message fields like 'phone', 'chatId', 'messageId'
+        """
+        # Check for UAZAPI-specific fields
+        has_instance = "instanceId" in payload or "instance" in payload
+        has_message_fields = "phone" in payload or "chatId" in payload
+        has_event = "event" in payload
+        
+        # UAZAPI typically has instance + event or direct message fields
+        if has_instance and (has_event or has_message_fields):
+            return True
+        
+        # Also check for nested message structure with from/to
+        if has_message_fields and ("messageId" in payload or "message" in payload):
+            return True
+            
+        return False
+    
+    def is_message_event(self, payload: dict) -> bool:
+        """Check if this is a new message event"""
+        event = payload.get("event", "")
+        
+        # Skip status updates and connection events
+        if event in ["status", "connection.update", "qrcode", "messages.update"]:
+            return False
+        
+        # Accept message events
+        if event in ["messages", "messages.upsert", "message", "received"]:
+            return True
+        
+        # If no event field, check for message content
+        if payload.get("phone") or payload.get("chatId"):
+            # Has message data and not a status update
+            if not payload.get("status"):
+                return True
+        
+        return False
+    
+    def parse_messages(self, payload: dict) -> List[StandardMessage]:
+        try:
+            parsed = UAZAPIWebhookPayload(**payload)
+            msg = parsed.to_standard_message()
+            return [msg] if msg else []
+        except Exception as e:
+            logger.error("UAZAPI parse error", error=str(e), payload=payload)
+            return []
+
+
 class GatewayAdapterFactory:
     """
     Factory for creating the appropriate gateway adapter.
@@ -138,6 +197,7 @@ class GatewayAdapterFactory:
         EvolutionAdapter(),
         ZAPIAdapter(),
         MetaCloudAdapter(),
+        UAZAPIAdapter(),
     ]
     
     @classmethod

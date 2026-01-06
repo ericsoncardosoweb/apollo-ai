@@ -276,3 +276,150 @@ class MetaCloudWebhookPayload(BaseModel):
                     ))
         
         return messages
+
+
+# ===========================================
+# UAZAPI SCHEMAS
+# ===========================================
+
+class UAZAPIMessage(BaseModel):
+    """UAZAPI message structure"""
+    id: Optional[str] = None
+    from_: Optional[str] = Field(None, alias="from")
+    to: Optional[str] = None
+    type: Optional[str] = "text"
+    text: Optional[str] = None
+    body: Optional[str] = None  # Alternative text field
+    caption: Optional[str] = None
+    media_url: Optional[str] = Field(None, alias="mediaUrl")
+    audio_url: Optional[str] = Field(None, alias="audioUrl")
+    image_url: Optional[str] = Field(None, alias="imageUrl")
+    document_url: Optional[str] = Field(None, alias="documentUrl")
+    timestamp: Optional[int] = None
+    
+    class Config:
+        populate_by_name = True
+
+
+class UAZAPIWebhookPayload(BaseModel):
+    """
+    UAZAPI webhook payload.
+    
+    UAZAPI sends different event types:
+    - messages: new message received
+    - messages.upsert: message status update
+    - connection.update: connection status
+    - qrcode: QR code for connection
+    """
+    event: Optional[str] = None
+    instance: Optional[str] = None
+    instanceId: Optional[str] = None
+    # Message fields
+    phone: Optional[str] = None
+    chatId: Optional[str] = None
+    messageId: Optional[str] = None
+    message: Optional[UAZAPIMessage] = None
+    # Alternative flat structure
+    text: Optional[str] = None
+    body: Optional[str] = None
+    type: Optional[str] = None
+    fromMe: bool = False
+    from_: Optional[str] = Field(None, alias="from")
+    to: Optional[str] = None
+    # Status updates
+    status: Optional[str] = None
+    # Connection updates
+    qrcode: Optional[str] = None
+    connected: Optional[bool] = None
+    # Tracking
+    track_source: Optional[str] = Field(None, alias="trackSource")
+    track_id: Optional[str] = Field(None, alias="trackId")
+    # Metadata
+    timestamp: Optional[int] = None
+    momment: Optional[str] = None
+    
+    class Config:
+        populate_by_name = True
+    
+    def to_standard_message(self) -> Optional[StandardMessage]:
+        """Convert UAZAPI payload to StandardMessage"""
+        # Skip if no message data
+        if not self.phone and not self.chatId and not (self.message and self.message.from_):
+            return None
+        
+        # Skip outgoing messages
+        if self.fromMe:
+            return None
+        
+        # Extract phone number
+        phone = self.phone or self.chatId or ""
+        if self.message and self.message.from_:
+            phone = self.message.from_
+        
+        # Clean phone (remove @s.whatsapp.net if present)
+        if "@" in phone:
+            phone = phone.split("@")[0]
+        
+        # Extract message ID
+        message_id = self.messageId or ""
+        if self.message and self.message.id:
+            message_id = self.message.id
+        
+        # Extract content
+        content = ""
+        content_type = "text"
+        media_url = None
+        
+        if self.message:
+            # Nested message structure
+            msg = self.message
+            content = msg.text or msg.body or msg.caption or ""
+            
+            if msg.type == "audio" or msg.audio_url:
+                content_type = "audio"
+                media_url = msg.audio_url or msg.media_url
+            elif msg.type == "image" or msg.image_url:
+                content_type = "image"
+                media_url = msg.image_url or msg.media_url
+                content = msg.caption or ""
+            elif msg.type == "document" or msg.document_url:
+                content_type = "document"
+                media_url = msg.document_url or msg.media_url
+                content = msg.caption or ""
+            elif msg.type == "video":
+                content_type = "video"
+                media_url = msg.media_url
+        else:
+            # Flat structure
+            content = self.text or self.body or ""
+            msg_type = self.type or "text"
+            
+            if msg_type == "audio":
+                content_type = "audio"
+            elif msg_type == "image":
+                content_type = "image"
+            elif msg_type == "document":
+                content_type = "document"
+            elif msg_type == "video":
+                content_type = "video"
+        
+        # Parse timestamp
+        timestamp = datetime.utcnow()
+        if self.timestamp:
+            try:
+                timestamp = datetime.fromtimestamp(self.timestamp)
+            except:
+                pass
+        
+        return StandardMessage(
+            message_id=message_id or f"uazapi_{int(datetime.utcnow().timestamp())}",
+            chat_id=phone,
+            phone=phone,
+            content=content,
+            content_type=content_type,
+            media_url=media_url,
+            is_from_me=self.fromMe,
+            timestamp=timestamp,
+            raw_payload=self.model_dump()
+        )
+

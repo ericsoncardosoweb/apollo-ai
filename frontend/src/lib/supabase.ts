@@ -1,6 +1,11 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-// Lazy initialization pattern for development
+// Development fallback credentials
+// In production, these should come from environment variables
+const DEV_SUPABASE_URL = 'https://qdugrmcdbbqabokmmftl.supabase.co'
+const DEV_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFkdWdybWNkYmJxYWJva21tZnRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc2NjUxODksImV4cCI6MjA4MzI0MTE4OX0.FInbgp79XIWeWjBSESvRYj_FLYnvoIUat_3zVzYZ4HI'
+
+// Lazy initialization pattern
 let supabaseInstance: SupabaseClient | null = null
 
 function getSupabaseClient(): SupabaseClient {
@@ -8,23 +13,11 @@ function getSupabaseClient(): SupabaseClient {
         return supabaseInstance
     }
 
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+    // Try environment variables first, fall back to dev credentials
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || DEV_SUPABASE_URL
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || DEV_SUPABASE_ANON_KEY
 
-    if (!supabaseUrl || !supabaseAnonKey) {
-        console.warn('⚠️ Supabase environment variables not configured. Authentication will not work.')
-        console.warn('Please create a .env file in the frontend directory with:')
-        console.warn('  VITE_SUPABASE_URL=https://your-project.supabase.co')
-        console.warn('  VITE_SUPABASE_ANON_KEY=your-anon-key')
-
-        // Return a mock client for development
-        supabaseInstance = createClient(
-            'https://placeholder.supabase.co',
-            'placeholder-key',
-            { auth: { autoRefreshToken: false, persistSession: false } }
-        )
-        return supabaseInstance
-    }
+    console.log('🔗 Supabase connecting to:', supabaseUrl)
 
     supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
         auth: {

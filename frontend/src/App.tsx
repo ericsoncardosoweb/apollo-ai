@@ -1,15 +1,20 @@
 /**
  * Apollo A.I. Advanced - Main Application Router
- * Role-based routing with protected routes
+ * Role-based routing with 3 environments:
+ * - /master: Global platform administration
+ * - /admin: Company-specific administration (requires selectedCompany)
+ * - /app: Client/user view
  */
 
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { AuthProvider } from '@/contexts/AuthContext'
-import { TenantProvider } from '@/contexts/TenantContext'
+import { ViewContextProvider } from '@/contexts/ViewContext'
 import { Center, Loader, Stack, Text } from '@mantine/core'
+import { isPlatformAdmin } from '@/types'
 
 // Layouts
+import MasterLayout from '@/components/layout/MasterLayout'
 import AdminLayout from '@/components/layout/AdminLayout'
 import ClientLayout from '@/components/layout/ClientLayout'
 
@@ -19,21 +24,29 @@ import Register from '@/pages/Register'
 import ForgotPassword from '@/pages/ForgotPassword'
 import ResetPassword from '@/pages/ResetPassword'
 
-// Admin Pages
-import AdminDashboard from '@/pages/admin/Dashboard'
-import AdminCompanies from '@/pages/admin/Companies'
+// Master Pages (Global Platform Admin)
+import MasterDashboard from '@/pages/admin/Dashboard'
+import MasterCompanies from '@/pages/admin/Companies'
+import MasterKanban from '@/pages/admin/CompanyKanban'
+import MasterPlans from '@/pages/admin/Plans'
+import MasterUsers from '@/pages/admin/Users'
+import MasterAnalytics from '@/pages/admin/Analytics'
+import MasterSettings from '@/pages/admin/Settings'
+
+// Admin Pages (Company-Specific)
+import AdminDashboardNew from '@/pages/admin/AdminDashboard'
+import AdminInbox from '@/pages/admin/Inbox'
+import AdminContacts from '@/pages/admin/Contacts'
+import AdminMessaging from '@/pages/admin/Messaging'
 import AdminAgents from '@/pages/admin/Agents'
-import AdminUsers from '@/pages/admin/Users'
-import AdminWebhooks from '@/pages/admin/Webhooks'
+import AdminTools from '@/pages/admin/Tools'
+import AdminKnowledge from '@/pages/admin/Knowledge'
 import AdminAnalytics from '@/pages/admin/Analytics'
 import AdminSettings from '@/pages/admin/Settings'
 
-// Client/App Pages
+// Client/App Pages (subset of admin - shared components)
 import AppDashboard from '@/pages/app/Dashboard'
-import AppInbox from '@/pages/app/Inbox'
 import AppCRM from '@/pages/app/CRM'
-import AppContacts from '@/pages/app/Contacts'
-import AppAgents from '@/pages/app/Agents'
 import AppAnalytics from '@/pages/app/Analytics'
 import AppSettings from '@/pages/app/Settings'
 
@@ -65,8 +78,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <>{children}</>
 }
 
-// Admin Route - Requires admin role
-function AdminRoute({ children }: { children: React.ReactNode }) {
+// Platform Admin Route - Requires master/admin/operator role
+function PlatformAdminRoute({ children }: { children: React.ReactNode }) {
     const { user, role, loading } = useAuth()
     const location = useLocation()
 
@@ -78,8 +91,8 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
         return <Navigate to="/login" state={{ from: location }} replace />
     }
 
-    // Only admins can access admin routes
-    if (role !== 'admin') {
+    // Only platform admins can access these routes
+    if (!isPlatformAdmin(role)) {
         return <Navigate to="/app" replace />
     }
 
@@ -89,17 +102,28 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 // Public Route - Redirects authenticated users
 function PublicRoute({ children }: { children: React.ReactNode }) {
     const { user, role, loading } = useAuth()
+    const location = useLocation()
 
     if (loading) {
         return <LoadingScreen />
     }
 
     if (user) {
-        // Redirect to appropriate dashboard based on role
-        if (role === 'admin') {
-            return <Navigate to="/admin" replace />
+        // Client and attendant roles always go to /app
+        if (role === 'client' || role === 'attendant') {
+            return <Navigate to="/app" replace />
         }
-        return <Navigate to="/app" replace />
+
+        // Platform admins (master, admin, operator) - use last visited panel or default to /admin
+        const lastPanel = localStorage.getItem('apollo_last_panel')
+        const validPanels = ['/master', '/admin', '/app']
+
+        if (lastPanel && validPanels.some(p => lastPanel.startsWith(p))) {
+            return <Navigate to={lastPanel} replace />
+        }
+
+        // Default: admin goes to admin view, master goes to master
+        return <Navigate to={role === 'master' ? '/master' : '/admin'} replace />
     }
 
     return <>{children}</>
@@ -108,6 +132,7 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 // Smart Home Redirect - Goes to correct dashboard based on role
 function HomeRedirect() {
     const { user, role, loading } = useAuth()
+    const location = useLocation()
 
     if (loading) {
         return <LoadingScreen />
@@ -117,11 +142,21 @@ function HomeRedirect() {
         return <Navigate to="/login" replace />
     }
 
-    if (role === 'admin') {
-        return <Navigate to="/admin" replace />
+    // Client and attendant roles always go to /app
+    if (role === 'client' || role === 'attendant') {
+        return <Navigate to="/app" replace />
     }
 
-    return <Navigate to="/app" replace />
+    // Platform admins (master, admin, operator) - use last visited panel
+    const lastPanel = localStorage.getItem('apollo_last_panel')
+    const validPanels = ['/master', '/admin', '/app']
+
+    if (lastPanel && validPanels.some(p => lastPanel.startsWith(p))) {
+        return <Navigate to={lastPanel} replace />
+    }
+
+    // Default: master to master, others to admin
+    return <Navigate to={role === 'master' ? '/master' : '/admin'} replace />
 }
 
 function AppRoutes() {
@@ -147,34 +182,56 @@ function AppRoutes() {
                 <ResetPassword />
             } />
 
-            {/* Admin Routes - Platform Administrators */}
-            <Route path="/admin" element={
-                <AdminRoute>
-                    <AdminLayout />
-                </AdminRoute>
+            {/* Master Routes - Global Platform Administration */}
+            <Route path="/master" element={
+                <PlatformAdminRoute>
+                    <ViewContextProvider>
+                        <MasterLayout />
+                    </ViewContextProvider>
+                </PlatformAdminRoute>
             }>
-                <Route index element={<AdminDashboard />} />
-                <Route path="companies" element={<AdminCompanies />} />
+                <Route index element={<MasterDashboard />} />
+                <Route path="companies" element={<MasterCompanies />} />
+                <Route path="kanban" element={<MasterKanban />} />
+                <Route path="plans" element={<MasterPlans />} />
+                <Route path="users" element={<MasterUsers />} />
+                <Route path="analytics" element={<MasterAnalytics />} />
+                <Route path="settings" element={<MasterSettings />} />
+            </Route>
+
+            {/* Admin Routes - Company-Specific Administration */}
+            <Route path="/admin" element={
+                <PlatformAdminRoute>
+                    <ViewContextProvider>
+                        <AdminLayout />
+                    </ViewContextProvider>
+                </PlatformAdminRoute>
+            }>
+                <Route index element={<AdminDashboardNew />} />
+                <Route path="inbox" element={<AdminInbox />} />
+                <Route path="crm" element={<AppCRM />} />
+                <Route path="contacts" element={<AdminContacts />} />
+                <Route path="messaging" element={<AdminMessaging />} />
                 <Route path="agents" element={<AdminAgents />} />
-                <Route path="users" element={<AdminUsers />} />
-                <Route path="webhooks" element={<AdminWebhooks />} />
+                <Route path="tools" element={<AdminTools />} />
+                <Route path="knowledge" element={<AdminKnowledge />} />
                 <Route path="analytics" element={<AdminAnalytics />} />
                 <Route path="settings" element={<AdminSettings />} />
             </Route>
 
-            {/* Client Routes - Company Users (Operators/Managers) */}
+            {/* Client Routes - Company Users (subset of admin features) */}
             <Route path="/app" element={
                 <ProtectedRoute>
-                    <TenantProvider>
+                    <ViewContextProvider>
                         <ClientLayout />
-                    </TenantProvider>
+                    </ViewContextProvider>
                 </ProtectedRoute>
             }>
                 <Route index element={<AppDashboard />} />
-                <Route path="inbox" element={<AppInbox />} />
+                <Route path="inbox" element={<AdminInbox />} />
                 <Route path="crm" element={<AppCRM />} />
-                <Route path="contacts" element={<AppContacts />} />
-                <Route path="agents" element={<AppAgents />} />
+                <Route path="contacts" element={<AdminContacts />} />
+                <Route path="knowledge" element={<AdminKnowledge />} />
                 <Route path="analytics" element={<AppAnalytics />} />
                 <Route path="settings" element={<AppSettings />} />
             </Route>

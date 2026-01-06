@@ -53,7 +53,7 @@ const mockConversations: Conversation[] = [
         unread_count: 3,
         agent_name: 'Assistente de Vendas',
         status: 'active',
-        is_typing: true, // Buffer Ativo
+        is_typing: true,
         is_spy_mode: false,
     },
     {
@@ -77,18 +77,6 @@ const mockConversations: Conversation[] = [
         unread_count: 1,
         agent_name: 'Suporte Técnico',
         status: 'waiting',
-        is_typing: false,
-        is_spy_mode: false,
-    },
-    {
-        id: '4',
-        contact_name: 'Ana Pereira',
-        contact_phone: '+55 41 96666-3456',
-        last_message: 'Qual o prazo de entrega para São Paulo?',
-        last_message_at: new Date(Date.now() - 7200000).toISOString(),
-        unread_count: 0,
-        agent_name: 'Assistente de Vendas',
-        status: 'active',
         is_typing: false,
         is_spy_mode: false,
     },
@@ -260,7 +248,6 @@ export default function AppInbox() {
     // Handle Panic Button - Take over conversation from AI
     const handlePanicMode = () => {
         setIsPanicMode(!isPanicMode)
-        // In real implementation: Notify backend to pause AI agent
     }
 
     return (

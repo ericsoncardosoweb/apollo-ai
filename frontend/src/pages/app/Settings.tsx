@@ -1,5 +1,6 @@
-import { Title, Text, Card, Stack, Group, TextInput, Button, Switch, Divider, Textarea, Select } from '@mantine/core'
+import { Title, Text, Card, Stack, Group, TextInput, Button, Switch, Divider, Select } from '@mantine/core'
 import { IconDeviceFloppy, IconBrandWhatsapp } from '@tabler/icons-react'
+import { PhoneInput, EmailInput, RichTextEditor } from '@/components/form'
 
 export default function AppSettings() {
     return (
@@ -16,13 +17,12 @@ export default function AppSettings() {
                         label="Nome da Empresa"
                         placeholder="Sua empresa"
                     />
-                    <TextInput
+                    <EmailInput
                         label="E-mail de Contato"
                         placeholder="contato@empresa.com"
                     />
-                    <TextInput
+                    <PhoneInput
                         label="Telefone"
-                        placeholder="+55 11 99999-9999"
                     />
                     <Select
                         label="Fuso Horário"
@@ -42,15 +42,19 @@ export default function AppSettings() {
                     <Text fw={600}>WhatsApp Business</Text>
                 </Group>
                 <Stack gap="md">
-                    <TextInput
+                    <PhoneInput
                         label="Número do WhatsApp"
-                        placeholder="+55 11 99999-9999"
                     />
-                    <Textarea
-                        label="Mensagem de Boas-vindas"
-                        placeholder="Olá! Bem-vindo à nossa empresa..."
-                        minRows={3}
-                    />
+                    <div>
+                        <Text size="sm" fw={500} mb={4}>Mensagem de Boas-vindas</Text>
+                        <RichTextEditor
+                            content=""
+                            onChange={() => { }}
+                            placeholder="Olá! Bem-vindo à nossa empresa..."
+                            minHeight={80}
+                            maxHeight={200}
+                        />
+                    </div>
                     <Group justify="space-between">
                         <div>
                             <Text size="sm" fw={500}>Respostas Automáticas</Text>

@@ -1,9 +1,16 @@
 /**
  * Apollo A.I. Advanced - Type Definitions
+ * Comprehensive role-based multi-tenant system
  */
 
-// User roles in the system
-export type UserRole = 'admin' | 'client' | 'operator'
+// Platform-level roles (for platform staff)
+export type PlatformRole = 'master' | 'admin' | 'operator'
+
+// Company-level roles (for company members)
+export type CompanyRole = 'owner' | 'manager' | 'attendant'
+
+// Combined user role
+export type UserRole = PlatformRole | 'client' | 'attendant'
 
 // User profile from database
 export interface UserProfile {
@@ -13,29 +20,44 @@ export interface UserProfile {
     role: UserRole
     tenant_id: string | null
     avatar_url: string | null
+    is_active: boolean
     created_at: string
     updated_at: string
 }
 
-// Tenant/Company information
-export interface Tenant {
+// Company/Tenant information
+export interface Company {
     id: string
     name: string
     slug: string
     plan: 'starter' | 'pro' | 'enterprise'
     whatsapp_number: string | null
+    owner_id: string | null
     is_active: boolean
     created_at: string
 }
+
+// Company membership
+export interface CompanyMember {
+    id: string
+    user_id: string
+    company_id: string
+    role: CompanyRole
+    is_active: boolean
+    created_at: string
+}
+
+// View context - determines which interface to show
+export type ViewContext = 'platform' | 'company'
 
 // Navigation item for dynamic sidebar
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface NavItem {
     label: string
     href: string
-    icon: React.ComponentType<any> // Allow any icon component
+    icon: React.ComponentType<any>
     description?: string
-    roles: UserRole[] // Which roles can see this item
+    roles: UserRole[]
     badge?: string | number
 }
 
@@ -50,8 +72,8 @@ export interface Conversation {
     unread_count: number
     agent_name: string
     status: 'active' | 'waiting' | 'closed'
-    is_typing: boolean // Buffer Ativo
-    is_spy_mode: boolean // Modo Espião ativo
+    is_typing: boolean
+    is_spy_mode: boolean
 }
 
 // Chat message
@@ -65,11 +87,19 @@ export interface ChatMessage {
     is_read: boolean
 }
 
-// Inbox state
-export interface InboxState {
-    conversations: Conversation[]
-    selectedConversation: Conversation | null
-    messages: ChatMessage[]
-    isSpyMode: boolean
-    isPanicMode: boolean
+// Helper functions
+export function isPlatformAdmin(role: UserRole): boolean {
+    return ['master', 'admin', 'operator'].includes(role)
+}
+
+export function canManageCompanies(role: UserRole): boolean {
+    return ['master', 'admin', 'operator'].includes(role)
+}
+
+export function canManageUsers(role: UserRole): boolean {
+    return ['master', 'admin'].includes(role)
+}
+
+export function canAccessPlatformSettings(role: UserRole): boolean {
+    return ['master', 'admin'].includes(role)
 }

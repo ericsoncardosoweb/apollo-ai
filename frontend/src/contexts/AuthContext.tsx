@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { UserRole, UserProfile } from '@/types'
+import { UserRole, UserProfile, isPlatformAdmin } from '@/types'
 
 interface AuthContextType {
     user: User | null
@@ -14,8 +14,12 @@ interface AuthContextType {
     signOut: () => Promise<void>
     resetPassword: (email: string) => Promise<void>
     updatePassword: (newPassword: string) => Promise<void>
+    refreshProfile: () => Promise<void>
+    // Role helpers
+    isMaster: boolean
     isAdmin: boolean
-    isClient: boolean
+    isOperator: boolean
+    isPlatformAdmin: boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -26,49 +30,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [profile, setProfile] = useState<UserProfile | null>(null)
     const [loading, setLoading] = useState(true)
 
-    // Fetch user profile with role from database
-    const fetchProfile = useCallback(async (userId: string) => {
+    // Fetch user profile with role from database - with timeout to prevent infinite hang
+    const fetchProfile = useCallback(async (userId: string, userEmail: string): Promise<void> => {
+        console.log('🔍 Fetching profile for:', userId, userEmail)
+
+        // Create a default profile fallback
+        const defaultProfile: UserProfile = {
+            id: userId,
+            email: userEmail,
+            name: null,
+            role: 'client',
+            tenant_id: null,
+            avatar_url: null,
+            is_active: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        }
+
         try {
-            const { data, error } = await supabase
+            // Race the query against a timeout to prevent infinite loading
+            const timeoutPromise = new Promise<null>((_, reject) => {
+                setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
+            })
+
+            const queryPromise = supabase
                 .from('user_profiles')
                 .select('*')
                 .eq('id', userId)
                 .single()
 
+            const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as Awaited<typeof queryPromise>
+
+            console.log('📊 Profile query result:', { data, error })
+
             if (error) {
-                console.warn('Profile not found, using default role:', error.message)
-                // Default profile for users without profile in DB
-                setProfile({
-                    id: userId,
-                    email: user?.email || '',
-                    name: null,
-                    role: 'client', // Default role
-                    tenant_id: null,
-                    avatar_url: null,
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString(),
-                })
+                console.warn('⚠️ Profile not found, using default:', error.message)
+                setProfile(defaultProfile)
                 return
             }
 
+            console.log('✅ Profile loaded, role:', data.role)
             setProfile(data as UserProfile)
         } catch (err) {
-            console.error('Error fetching profile:', err)
+            console.error('❌ Error fetching profile (using default):', err)
+            // Set default profile on any error (including timeout)
+            setProfile(defaultProfile)
         }
-    }, [user?.email])
+    }, [])
 
     useEffect(() => {
         // Get initial session
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            setSession(session)
-            setUser(session?.user ?? null)
+        const initSession = async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession()
+                setSession(session)
+                setUser(session?.user ?? null)
 
-            if (session?.user) {
-                fetchProfile(session.user.id)
+                if (session?.user) {
+                    // IMPORTANT: Await the profile fetch to ensure role is loaded before routing
+                    await fetchProfile(session.user.id, session.user.email || '')
+                }
+            } catch (err) {
+                console.error('❌ Error getting session:', err)
+            } finally {
+                setLoading(false)
             }
+        }
 
-            setLoading(false)
-        })
+        initSession()
 
         // Listen for auth changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -77,7 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setUser(session?.user ?? null)
 
                 if (session?.user) {
-                    await fetchProfile(session.user.id)
+                    await fetchProfile(session.user.id, session.user.email || '')
                 } else {
                     setProfile(null)
                 }
@@ -95,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const signUp = async (email: string, password: string, name: string) => {
-        const { data, error } = await supabase.auth.signUp({
+        const { error } = await supabase.auth.signUp({
             email,
             password,
             options: {
@@ -103,22 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
         })
         if (error) throw error
-
-        // Create initial profile in database
-        if (data.user) {
-            const { error: profileError } = await supabase
-                .from('user_profiles')
-                .insert({
-                    id: data.user.id,
-                    email: email,
-                    name: name,
-                    role: 'client', // Default role for new users
-                })
-
-            if (profileError) {
-                console.error('Error creating profile:', profileError)
-            }
-        }
+        // Profile will be created by database trigger
     }
 
     const signOut = async () => {
@@ -139,10 +153,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error) throw error
     }
 
+    const refreshProfile = async () => {
+        if (user) {
+            await fetchProfile(user.id, user.email || '')
+        }
+    }
+
     // Computed role properties
     const role: UserRole = profile?.role || 'client'
+    const isMaster = role === 'master'
     const isAdmin = role === 'admin'
-    const isClient = role === 'client'
+    const isOperator = role === 'operator'
+    const isPlatformAdminUser = isPlatformAdmin(role)
 
     return (
         <AuthContext.Provider value={{
@@ -156,8 +178,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             signOut,
             resetPassword,
             updatePassword,
+            refreshProfile,
+            isMaster,
             isAdmin,
-            isClient,
+            isOperator,
+            isPlatformAdmin: isPlatformAdminUser,
         }}>
             {children}
         </AuthContext.Provider>

@@ -1,9 +1,9 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
-import { Tenant } from '@/types'
+import { Company } from '@/types'
 
 interface TenantContextType {
-    tenant: Tenant | null
+    tenant: Company | null
     loading: boolean
     error: string | null
     refetch: () => Promise<void>
@@ -12,22 +12,23 @@ interface TenantContextType {
 const TenantContext = createContext<TenantContextType | undefined>(undefined)
 
 // Mock tenant for development when API is not available
-const mockTenant: Tenant = {
+const mockTenant: Company = {
     id: 'mock-tenant-id',
     name: 'Empresa Demo',
     slug: 'empresa-demo',
     plan: 'pro',
     whatsapp_number: '+55 11 99999-9999',
+    owner_id: null,
     is_active: true,
     created_at: new Date().toISOString(),
 }
 
 export function TenantProvider({ children }: { children: ReactNode }) {
-    const [tenant, setTenant] = useState<Tenant | null>(null)
+    const [tenant, setTenant] = useState<Company | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
 
-    const fetchTenant = async () => {
+    const fetchTenant = useCallback(async () => {
         try {
             setLoading(true)
             setError(null)
@@ -37,15 +38,15 @@ export function TenantProvider({ children }: { children: ReactNode }) {
             console.warn('Tenant API not available, using mock data')
             // Use mock tenant for development
             setTenant(mockTenant)
-            setError(null) // Don't show error in development
+            setError(null)
         } finally {
             setLoading(false)
         }
-    }
+    }, [])
 
     useEffect(() => {
         fetchTenant()
-    }, [])
+    }, [fetchTenant])
 
     return (
         <TenantContext.Provider value={{ tenant, loading, error, refetch: fetchTenant }}>

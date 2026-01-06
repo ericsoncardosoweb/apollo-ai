@@ -338,6 +338,107 @@ class MetaCloudSender(BaseGatewaySender):
             return SendResult(success=False, error=str(e))
 
 
+class UAZAPISender(BaseGatewaySender):
+    """UAZAPI message sender (Brazilian WhatsApp API)"""
+    
+    def __init__(self, base_url: str = None):
+        # UAZAPI base URL comes from tenant config, not global settings
+        self.base_url = base_url
+    
+    async def send_text(
+        self,
+        phone: str,
+        message: str,
+        instance_id: str,
+        api_key: str
+    ) -> SendResult:
+        """Send text message via UAZAPI"""
+        # Get base URL from tenant config (passed as instance_id prefix if needed)
+        # For now, use default UAZAPI endpoint
+        base_url = self.base_url or "https://api.uazapi.com.br"
+        url = f"{base_url}/message/send-text/{instance_id}"
+        
+        # Format phone for UAZAPI
+        phone_formatted = phone
+        if not phone.endswith("@s.whatsapp.net"):
+            phone_formatted = f"{phone}@s.whatsapp.net"
+        
+        payload = {
+            "number": phone_formatted,
+            "text": message
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, json=payload, headers=headers)
+                data = response.json()
+                
+                if response.status_code in [200, 201]:
+                    return SendResult(
+                        success=True,
+                        message_id=data.get("messageId") or data.get("id"),
+                        raw_response=data
+                    )
+                else:
+                    return SendResult(
+                        success=False,
+                        error=data.get("error", str(data)),
+                        raw_response=data
+                    )
+        except Exception as e:
+            logger.error("UAZAPI send failed", error=str(e))
+            return SendResult(success=False, error=str(e))
+    
+    async def send_image(
+        self,
+        phone: str,
+        image_url: str,
+        caption: Optional[str],
+        instance_id: str,
+        api_key: str
+    ) -> SendResult:
+        """Send image via UAZAPI"""
+        base_url = self.base_url or "https://api.uazapi.com.br"
+        url = f"{base_url}/message/send-image/{instance_id}"
+        
+        phone_formatted = phone
+        if not phone.endswith("@s.whatsapp.net"):
+            phone_formatted = f"{phone}@s.whatsapp.net"
+        
+        payload = {
+            "number": phone_formatted,
+            "imageUrl": image_url,
+            "caption": caption or ""
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(url, json=payload, headers=headers)
+                data = response.json()
+                
+                if response.status_code in [200, 201]:
+                    return SendResult(
+                        success=True,
+                        message_id=data.get("messageId") or data.get("id"),
+                        raw_response=data
+                    )
+                else:
+                    return SendResult(success=False, error=str(data), raw_response=data)
+        except Exception as e:
+            logger.error("UAZAPI image send failed", error=str(e))
+            return SendResult(success=False, error=str(e))
+
+
 class WhatsAppSender:
     """
     High-level WhatsApp message sender.
