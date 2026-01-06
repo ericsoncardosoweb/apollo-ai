@@ -351,7 +351,7 @@ export default function DatabaseSetupForm({ tenantId, tenantName, onComplete }: 
                                             leftSection={<IconRefresh size={16} />}
                                             variant="light"
                                         >
-                                            Atualizar para v2
+                                            Atualizar Agora
                                         </Button>
                                         <CopyButton value={CLIENT_MIGRATIONS_V1}>
                                             {({ copied, copy }) => (
@@ -485,7 +485,21 @@ export default function DatabaseSetupForm({ tenantId, tenantName, onComplete }: 
                         <Text c="dimmed" mb="md">
                             O Supabase de {tenantName} está pronto para uso.
                         </Text>
-                        <Badge size="lg" color="green" mb="lg">Ativo</Badge>
+                        <Group gap="xs" justify="center" mb="lg">
+                            <Badge size="lg" color="green">ATIVO</Badge>
+                            <Tooltip label="Rodar migrações pendentes">
+                                <ActionIcon
+                                    variant="light"
+                                    color="blue"
+                                    size="lg"
+                                    radius="xl"
+                                    onClick={handleRunMigrations}
+                                    loading={runMigrations.isPending}
+                                >
+                                    <IconRefresh size={16} />
+                                </ActionIcon>
+                            </Tooltip>
+                        </Group>
 
                         <Group justify="center" mt="md">
                             <Button
@@ -493,7 +507,7 @@ export default function DatabaseSetupForm({ tenantId, tenantName, onComplete }: 
                                 leftSection={<IconRefresh size={16} />}
                                 onClick={() => setActiveStep(2)}
                             >
-                                Atualizar Migrações
+                                Ver Migrações
                             </Button>
                             <CopyButton value={supabaseUrl}>
                                 {({ copied, copy }) => (

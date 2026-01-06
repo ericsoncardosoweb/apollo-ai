@@ -56,140 +56,93 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Application lifespan handler for startup and shutdown events.
     
-    Starts background workers:
+    Starts background workers (optional - won't crash if unavailable):
     - Message Buffer Watchdog (anti-picote)
     - Re-engagement Watchdog (arremate)
     """
-    from app.services.message_buffer import get_message_buffer, BufferWatchdog
-    from app.services.reengagement import get_reengagement_watchdog
-    
     logger.info(
         "Starting Apollo A.I. Advanced API",
         environment=settings.environment,
         debug=settings.debug
     )
     
-    # Initialize services
-    buffer_service = get_message_buffer()
-    reengagement_watchdog = get_reengagement_watchdog()
+    buffer_watchdog = None
+    reengagement_watchdog = None
     
-    # Register buffer handler (sends to AI when buffer expires)
-    async def handle_buffered_messages(packet):
-        """Process buffered messages - send to AI for response and reply via WhatsApp"""
-        from app.services.ai_orchestrator import get_ai_orchestrator
-        from app.services.whatsapp_sender import get_whatsapp_sender
-        
-        logger.info(
-            "Buffer ready for AI processing",
-            chat_id=packet.chat_id,
-            message_count=packet.message_count,
-            has_audio=packet.has_audio,
-            tenant_id=packet.tenant_id
-        )
-        
-        try:
-            # Generate AI response
-            orchestrator = get_ai_orchestrator()
-            response = await orchestrator.process_message_packet(packet)
-            
-            if response:
-                # Send response via WhatsApp
-                sender = get_whatsapp_sender()
-                result = await sender.send_text(
-                    tenant_id=packet.tenant_id,
-                    phone=packet.phone,
-                    message=response
-                )
-                
-                if result.success:
-                    logger.info(
-                        "AI response sent",
-                        chat_id=packet.chat_id,
-                        message_id=result.message_id
-                    )
-                else:
-                    logger.error(
-                        "Failed to send AI response",
-                        chat_id=packet.chat_id,
-                        error=result.error
-                    )
-        except Exception as e:
-            logger.error(
-                "Error processing message packet",
-                chat_id=packet.chat_id,
-                error=str(e)
-            )
-    
-    buffer_service.on_buffer_ready(handle_buffered_messages)
-    
-    # Register re-engagement handler
-    async def handle_reengagement(event):
-        """Handle re-engagement trigger - generate contextual follow-up"""
-        from app.services.whatsapp_sender import get_whatsapp_sender
-        from app.db.supabase import get_supabase
-        
-        logger.info(
-            "Re-engagement triggered",
-            conversation_id=event.conversation_id,
-            attempt=event.attempt_number,
-            silence_minutes=event.silence_duration_minutes
-        )
-        
-        try:
-            supabase = get_supabase()
-            
-            # Get agent's re-engagement prompts
-            agent = supabase.table("agents").select(
-                "reengagement_prompts"
-            ).eq("id", event.agent_id).single().execute()
-            
-            prompts = agent.data.get("reengagement_prompts", []) if agent.data else []
-            
-            # Select prompt based on attempt number
-            prompt_index = min(event.attempt_number - 1, len(prompts) - 1)
-            if prompts and prompt_index >= 0:
-                message = prompts[prompt_index]
-            else:
-                message = "Olá! Ainda posso ajudar com algo?"
-            
-            # Send re-engagement message
-            sender = get_whatsapp_sender()
-            result = await sender.send_text(
-                tenant_id=event.tenant_id,
-                phone=event.phone,
-                message=message
-            )
-            
-            if result.success:
-                # Save message to database
-                supabase.table("messages").insert({
-                    "conversation_id": event.conversation_id,
-                    "tenant_id": event.tenant_id,
-                    "sender_type": "ai",
-                    "content": message,
-                    "content_type": "text",
-                }).execute()
-                
-                logger.info("Re-engagement message sent", conversation_id=event.conversation_id)
-            
-        except Exception as e:
-            logger.error(
-                "Re-engagement failed",
-                conversation_id=event.conversation_id,
-                error=str(e)
-            )
-    
-    reengagement_watchdog.on_reengagement_needed(handle_reengagement)
-    
-    # Start background workers
-    buffer_watchdog = BufferWatchdog(buffer_service)
-    
+    # Try to initialize background services (optional - may not be available)
     try:
-        await buffer_watchdog.start()
-        await reengagement_watchdog.start()
-        logger.info("Background workers started")
+        from app.services.message_buffer import get_message_buffer, BufferWatchdog
+        from app.services.reengagement import get_reengagement_watchdog
+        
+        buffer_service = get_message_buffer()
+        reengagement_wd = get_reengagement_watchdog()
+        
+        # Register buffer handler
+        async def handle_buffered_messages(packet):
+            """Process buffered messages - send to AI for response"""
+            try:
+                from app.services.ai_orchestrator import get_ai_orchestrator
+                from app.services.whatsapp_sender import get_whatsapp_sender
+                
+                logger.info("Buffer ready for AI processing", chat_id=packet.chat_id)
+                
+                orchestrator = get_ai_orchestrator()
+                response = await orchestrator.process_message_packet(packet)
+                
+                if response:
+                    sender = get_whatsapp_sender()
+                    await sender.send_text(
+                        tenant_id=packet.tenant_id,
+                        phone=packet.phone,
+                        message=response
+                    )
+            except Exception as e:
+                logger.error("Error processing message packet", error=str(e))
+        
+        buffer_service.on_buffer_ready(handle_buffered_messages)
+        
+        # Register re-engagement handler
+        async def handle_reengagement(event):
+            """Handle re-engagement trigger"""
+            try:
+                from app.services.whatsapp_sender import get_whatsapp_sender
+                from app.db.supabase import get_supabase
+                
+                logger.info("Re-engagement triggered", conversation_id=event.conversation_id)
+                
+                supabase = get_supabase()
+                agent = supabase.table("agents").select(
+                    "reengagement_prompts"
+                ).eq("id", event.agent_id).single().execute()
+                
+                prompts = agent.data.get("reengagement_prompts", []) if agent.data else []
+                prompt_index = min(event.attempt_number - 1, len(prompts) - 1)
+                message = prompts[prompt_index] if prompts and prompt_index >= 0 else "Olá! Ainda posso ajudar?"
+                
+                sender = get_whatsapp_sender()
+                await sender.send_text(
+                    tenant_id=event.tenant_id,
+                    phone=event.phone,
+                    message=message
+                )
+            except Exception as e:
+                logger.error("Re-engagement failed", error=str(e))
+        
+        reengagement_wd.on_reengagement_needed(handle_reengagement)
+        
+        # Start background workers
+        buffer_watchdog = BufferWatchdog(buffer_service)
+        
+        try:
+            await buffer_watchdog.start()
+            await reengagement_wd.start()
+            reengagement_watchdog = reengagement_wd
+            logger.info("Background workers started")
+        except Exception as e:
+            logger.warning(f"Failed to start some workers: {e}")
+            
     except Exception as e:
-        logger.warning(f"Failed to start some workers: {e}")
+        logger.warning(f"Background services not available: {e}. API will run without workers.")
     
     yield
     
@@ -197,8 +150,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Shutting down Apollo A.I. Advanced API")
     
     try:
-        await buffer_watchdog.stop()
-        await reengagement_watchdog.stop()
+        if buffer_watchdog:
+            await buffer_watchdog.stop()
+        if reengagement_watchdog:
+            await reengagement_watchdog.stop()
         logger.info("Background workers stopped")
     except Exception as e:
         logger.warning(f"Error stopping workers: {e}")
@@ -312,30 +267,43 @@ Include the token in the `Authorization: Bearer <token>` header.
     # Include API v1 routers
     app.include_router(api_v1_router, prefix="/api/v1")
 
-    # Health check endpoint
+    # Health check endpoint (MUST always return 200 for container liveness)
     @app.get("/health", tags=["Health"])
     async def health_check():
         """
         Health check endpoint for load balancers and monitoring.
         
-        Returns service status and version information.
+        Always returns 200 OK - reports service status but never fails.
         """
-        from app.db.redis import get_redis
+        redis_status = "unknown"
+        supabase_status = "unknown"
         
-        redis_ok = False
+        # Check Redis (optional)
         try:
+            from app.db.redis import get_redis
             redis = get_redis()
             await redis.client.ping()
-            redis_ok = True
-        except:
-            pass
+            redis_status = "connected"
+        except Exception:
+            redis_status = "disconnected"
+        
+        # Check Supabase (optional)
+        try:
+            from app.db.supabase import get_supabase
+            supabase = get_supabase()
+            # Simple query to test connection
+            supabase.table("tenants").select("id").limit(1).execute()
+            supabase_status = "connected"
+        except Exception:
+            supabase_status = "disconnected"
         
         return {
             "status": "healthy",
             "version": "0.1.0",
             "environment": settings.environment,
             "services": {
-                "redis": "connected" if redis_ok else "disconnected",
+                "redis": redis_status,
+                "supabase": supabase_status,
             }
         }
     

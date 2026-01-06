@@ -61,6 +61,8 @@ import {
 } from '@tabler/icons-react'
 import { useViewContext } from '@/contexts/ViewContext'
 import { useClientDatabaseStatus } from '@/hooks/useClientSupabase'
+import { useConversations, useMessages, useSendMessage, useUpdateConversationMode } from '@/hooks/useConversations'
+import type { Message as ApiMessage } from '@/hooks/useConversations'
 
 // Types
 interface Contact {
@@ -180,12 +182,55 @@ export default function AdminInbox() {
     const { selectedCompany } = useViewContext()
     const { isConfigured } = useClientDatabaseStatus()
 
+    // Hooks for real data
+    const conversationsQuery = useConversations()
+    const sendMessage = useSendMessage()
+    const updateMode = useUpdateConversationMode()
+
     const [activeTab, setActiveTab] = useState<string | null>('ai')
-    const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(MOCK_CONVERSATIONS[0])
+    const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
     const [message, setMessage] = useState('')
     const [search, setSearch] = useState('')
     const [isRecording, setIsRecording] = useState(false)
     const [isConnected, setIsConnected] = useState(true) // WhatsApp connection status
+
+    // Messages for selected conversation
+    const messagesQuery = useMessages(selectedConversationId)
+
+    // Transform API conversations to local format or use mock
+    const rawConversations = conversationsQuery.data?.items || []
+    const conversations: Conversation[] = rawConversations.length > 0 ? rawConversations.map(c => ({
+        id: c.id,
+        contact: {
+            id: c.id,
+            name: c.contact_name || 'Desconhecido',
+            phone: c.contact_phone || '',
+            tags: [],
+        },
+        lastMessage: c.last_message || '',
+        lastMessageAt: c.last_message_at ? new Date(c.last_message_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '',
+        unreadCount: c.unread_count || 0,
+        status: c.status === 'active' ? 'attending' : c.status === 'waiting' ? 'waiting' : 'resolved',
+        agentName: c.agent_name || 'IA',
+        agentType: 'ai' as 'ai' | 'human',
+        pipelineStage: undefined,
+        proposalValue: undefined,
+        interestedServices: undefined,
+    })) : MOCK_CONVERSATIONS
+
+    // Get selected conversation object
+    const selectedConversation = conversations.find(c => c.id === selectedConversationId) || conversations[0] || null
+
+    // Transform messages or use mock
+    const rawMessages = messagesQuery.data || []
+    const messages: Message[] = rawMessages.length > 0 ? rawMessages.map((m: ApiMessage) => ({
+        id: m.id,
+        sender: m.sender_type === 'client' ? 'contact' : m.sender_type as 'ai' | 'human',
+        type: m.content_type === 'text' ? 'text' : m.content_type as Message['type'],
+        content: m.content,
+        timestamp: new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        senderName: m.metadata?.sender_name as string | undefined,
+    })) : MOCK_MESSAGES
 
     // CRM panel state (editable)
     const [pipelineStage, setPipelineStage] = useState(selectedConversation?.pipelineStage || '')
@@ -258,7 +303,7 @@ export default function AdminInbox() {
     }
 
     return (
-        <Stack gap="md" h="calc(100vh - 140px)">
+        <Stack gap="md" style={{ height: 'calc(100vh - 120px)', overflow: 'hidden' }}>
             {/* Header */}
             <Group justify="space-between">
                 <div>
@@ -280,10 +325,10 @@ export default function AdminInbox() {
                 </Group>
             </Group>
 
-            {/* Main Layout: 3 columns */}
-            <Group gap="md" align="stretch" style={{ flex: 1, minHeight: 0 }}>
+            {/* Main Layout: 3 columns - FIXED HEIGHT */}
+            <Group gap="md" align="stretch" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
                 {/* LEFT: Conversation List */}
-                <Card withBorder padding={0} radius="md" style={{ width: 320, display: 'flex', flexDirection: 'column' }}>
+                <Card withBorder padding={0} radius="md" style={{ width: 320, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                     {/* Tabs */}
                     <Tabs value={activeTab} onChange={setActiveTab} variant="default">
                         <Tabs.List grow>
@@ -338,7 +383,7 @@ export default function AdminInbox() {
                                     p="sm"
                                     bg={selectedConversation?.id === conv.id ? 'dark.6' : 'transparent'}
                                     style={{ cursor: 'pointer', borderBottom: '1px solid var(--mantine-color-dark-5)' }}
-                                    onClick={() => setSelectedConversation(conv)}
+                                    onClick={() => setSelectedConversationId(conv.id)}
                                 >
                                     <Group justify="space-between" wrap="nowrap">
                                         <Group gap="sm" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
@@ -379,8 +424,8 @@ export default function AdminInbox() {
                     </ScrollArea>
                 </Card>
 
-                {/* CENTER: Chat Window */}
-                <Card withBorder padding={0} radius="md" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                {/* CENTER: Chat Window - Fixed layout */}
+                <Card withBorder padding={0} radius="md" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                     {selectedConversation ? (
                         <>
                             {/* Chat Header */}
@@ -416,8 +461,8 @@ export default function AdminInbox() {
                                 </Group>
                             </Group>
 
-                            {/* Messages */}
-                            <ScrollArea style={{ flex: 1 }} p="md">
+                            {/* Messages - Flex fill */}
+                            <ScrollArea style={{ flex: 1, minHeight: 0 }} p="md">
                                 <Stack gap="sm">
                                     {MOCK_MESSAGES.map((msg) => (
                                         msg.type === 'system' ? (
@@ -449,14 +494,14 @@ export default function AdminInbox() {
                                                     }}
                                                 >
                                                     {getSenderLabel(msg) && (
-                                                        <Text size="xs" fw={600} mb={4} c="dimmed">
+                                                        <Text size="xs" fw={600} mb={4} c="gray.3">
                                                             {getSenderLabel(msg)}
                                                         </Text>
                                                     )}
                                                     <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
                                                         {msg.content}
                                                     </Text>
-                                                    <Text size="xs" c="dimmed" ta="right" mt={4}>{msg.timestamp}</Text>
+                                                    <Text size="xs" c="gray.5" ta="right" mt={4}>{msg.timestamp}</Text>
                                                 </Paper>
                                             </Group>
                                         )
@@ -465,15 +510,13 @@ export default function AdminInbox() {
                             </ScrollArea>
 
                             {/* Input Area - Fixed at bottom */}
-                            <Divider />
                             <Group
                                 p="sm"
                                 gap="xs"
                                 bg="dark.7"
                                 style={{
-                                    position: 'sticky',
-                                    bottom: 0,
-                                    zIndex: 10,
+                                    borderTop: '1px solid var(--mantine-color-dark-4)',
+                                    flexShrink: 0,
                                     flexWrap: 'nowrap',
                                 }}
                             >
