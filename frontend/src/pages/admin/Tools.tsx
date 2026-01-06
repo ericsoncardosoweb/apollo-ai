@@ -52,6 +52,7 @@ import {
     IconRobot,
     IconLock,
     IconSearch,
+    IconBolt,
 } from '@tabler/icons-react'
 import {
     useTools,
@@ -71,6 +72,8 @@ import {
 } from '@/hooks/useTools'
 import { useClientDatabaseStatus } from '@/hooks/useClientSupabase'
 import { useViewContext } from '@/contexts/ViewContext'
+import { ToolTemplateBuilder, ToolTemplate } from '@/components/campaigns/ToolTemplateBuilder'
+import { MigrationAlert } from '@/components/admin/MigrationAlert'
 
 const TOOL_TYPE_CONFIG: Record<ToolType, { label: string; color: string; icon: typeof IconFunction }> = {
     function: { label: 'Função', color: 'blue', icon: IconFunction },
@@ -227,12 +230,11 @@ export default function AdminTools() {
         return (
             <Stack gap="lg">
                 <Title order={2}>Ferramentas</Title>
-                <Alert icon={<IconDatabase size={16} />} color="yellow" title="Migração Necessária">
-                    <Text size="sm" mb="sm">
-                        A tabela de ferramentas não foi encontrada. Execute a migração SQL.
-                    </Text>
-                    <Code block>{`-- Execute no banco do tenant: tools_v2.sql`}</Code>
-                </Alert>
+                <MigrationAlert
+                    tableName="tools"
+                    migrationFile="tools_v2.sql"
+                    onSuccess={() => refetchTools()}
+                />
             </Stack>
         )
     }
@@ -262,6 +264,9 @@ export default function AdminTools() {
                     <Tabs.List>
                         <Tabs.Tab value="functions" leftSection={<IconSettings size={16} />}>
                             Funções ({tools?.length || 0})
+                        </Tabs.Tab>
+                        <Tabs.Tab value="triggers" leftSection={<IconBolt size={16} />}>
+                            Gatilhos
                         </Tabs.Tab>
                         <Tabs.Tab value="integrations" leftSection={<IconWebhook size={16} />}>
                             Integrações ({integrations?.length || 0})
@@ -337,6 +342,11 @@ export default function AdminTools() {
                                 )}
                             </Stack>
                         )}
+                    </Tabs.Panel>
+
+                    {/* Triggers Panel - Gatilhos de Remarketing */}
+                    <Tabs.Panel value="triggers" pt="md">
+                        <TriggersPanel />
                     </Tabs.Panel>
 
                     {/* Integrations Panel */}
@@ -643,3 +653,147 @@ function ToolCard({
         </Card>
     )
 }
+
+// Triggers Panel for Remarketing
+function TriggersPanel() {
+    const [modalOpened, { open: openModal, close: closeModal }] = useDisclosure()
+    const [triggerName, setTriggerName] = useState('')
+    const [triggerEvent, setTriggerEvent] = useState('deal_stage_changed')
+    const [triggerDelay, setTriggerDelay] = useState<number | ''>(0)
+    const [template, setTemplate] = useState<ToolTemplate>({ blocks: [], variables: [] })
+
+    const TRIGGER_EVENTS = [
+        { value: 'deal_stage_changed', label: 'Negócio mudou de etapa' },
+        { value: 'deal_won', label: 'Negócio ganho' },
+        { value: 'deal_lost', label: 'Negócio perdido' },
+        { value: 'contact_created', label: 'Novo contato criado' },
+        { value: 'contact_inactive_7d', label: 'Contato inativo 7 dias' },
+        { value: 'contact_inactive_30d', label: 'Contato inativo 30 dias' },
+        { value: 'payment_due', label: 'Pagamento vencendo' },
+        { value: 'payment_overdue', label: 'Pagamento em atraso' },
+        { value: 'birthday', label: 'Aniversário do contato' },
+        { value: 'cart_abandoned', label: 'Carrinho abandonado' },
+        { value: 'message_no_reply_24h', label: 'Sem resposta em 24h' },
+    ]
+
+    // Mock triggers for demo
+    const [triggers] = useState([
+        { id: '1', name: 'Follow-up 7 dias', event: 'contact_inactive_7d', is_active: true, executions: 234 },
+        { id: '2', name: 'Lembrete Pagamento', event: 'payment_due', is_active: true, executions: 89 },
+        { id: '3', name: 'Boas-vindas', event: 'contact_created', is_active: false, executions: 567 },
+    ])
+
+    const handleCreate = () => {
+        setTriggerName('')
+        setTriggerEvent('deal_stage_changed')
+        setTriggerDelay(0)
+        setTemplate({ blocks: [], variables: [] })
+        openModal()
+    }
+
+    return (
+        <>
+            <Stack gap="md">
+                <Group justify="space-between">
+                    <div>
+                        <Text fw={600}>Gatilhos de Remarketing</Text>
+                        <Text size="xs" c="dimmed">
+                            Automações que disparam mensagens baseadas em eventos
+                        </Text>
+                    </div>
+                    <Button size="sm" leftSection={<IconPlus size={14} />} onClick={handleCreate}>
+                        Novo Gatilho
+                    </Button>
+                </Group>
+
+                <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+                    {triggers.map((trigger) => (
+                        <Card key={trigger.id} withBorder padding="md" radius="md">
+                            <Group justify="space-between" mb="sm">
+                                <Group gap="sm">
+                                    <ThemeIcon variant="light" color={trigger.is_active ? 'yellow' : 'gray'}>
+                                        <IconBolt size={18} />
+                                    </ThemeIcon>
+                                    <div>
+                                        <Text fw={500}>{trigger.name}</Text>
+                                        <Text size="xs" c="dimmed">
+                                            {TRIGGER_EVENTS.find(e => e.value === trigger.event)?.label}
+                                        </Text>
+                                    </div>
+                                </Group>
+                                <Switch checked={trigger.is_active} color="teal" />
+                            </Group>
+                            <Group justify="space-between">
+                                <Text size="xs" c="dimmed">{trigger.executions} execuções</Text>
+                                <Group gap="xs">
+                                    <ActionIcon variant="subtle" size="sm">
+                                        <IconEdit size={14} />
+                                    </ActionIcon>
+                                    <ActionIcon variant="subtle" size="sm" color="red">
+                                        <IconTrash size={14} />
+                                    </ActionIcon>
+                                </Group>
+                            </Group>
+                        </Card>
+                    ))}
+                </SimpleGrid>
+
+                <Alert color="blue" variant="light" title="💡 Como funcionam os gatilhos">
+                    <Text size="sm">
+                        Gatilhos são automações que enviam mensagens automaticamente quando eventos específicos acontecem.
+                        Configure o evento, delay e template da mensagem para criar remarketing inteligente.
+                    </Text>
+                </Alert>
+            </Stack>
+
+            {/* Create/Edit Trigger Modal */}
+            <Modal
+                opened={modalOpened}
+                onClose={closeModal}
+                title="Novo Gatilho de Remarketing"
+                size="xl"
+            >
+                <Stack gap="md">
+                    <TextInput
+                        label="Nome do Gatilho"
+                        placeholder="Ex: Follow-up após 7 dias"
+                        value={triggerName}
+                        onChange={(e) => setTriggerName(e.target.value)}
+                        required
+                    />
+
+                    <SimpleGrid cols={2}>
+                        <Select
+                            label="Evento Gatilho"
+                            description="Quando o gatilho deve disparar"
+                            data={TRIGGER_EVENTS}
+                            value={triggerEvent}
+                            onChange={(val) => setTriggerEvent(val || 'deal_stage_changed')}
+                        />
+                        <TextInput
+                            label="Delay (minutos)"
+                            description="Tempo de espera após o evento"
+                            type="number"
+                            value={triggerDelay}
+                            onChange={(e) => setTriggerDelay(Number(e.target.value))}
+                        />
+                    </SimpleGrid>
+
+                    <Text fw={500} size="sm" mt="md">Template da Mensagem</Text>
+                    <ToolTemplateBuilder
+                        value={template}
+                        onChange={setTemplate}
+                    />
+
+                    <Group justify="flex-end" mt="md">
+                        <Button variant="subtle" onClick={closeModal}>Cancelar</Button>
+                        <Button disabled={!triggerName || template.blocks.length === 0}>
+                            Criar Gatilho
+                        </Button>
+                    </Group>
+                </Stack>
+            </Modal>
+        </>
+    )
+}
+

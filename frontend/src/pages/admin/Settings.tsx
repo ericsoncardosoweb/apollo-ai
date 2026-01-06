@@ -46,6 +46,7 @@ import {
 } from '@/hooks/useConnections'
 import { useClientDatabaseStatus } from '@/hooks/useClientSupabase'
 import { useViewContext } from '@/contexts/ViewContext'
+import DatabaseSetupForm from '@/components/company/DatabaseSetupForm'
 
 const DAYS_OPTIONS = [
     { value: '0', label: 'Domingo' },
@@ -242,6 +243,9 @@ export default function AdminSettings() {
                         <Tabs.Tab value="general" leftSection={<IconSettings size={16} />}>
                             Geral
                         </Tabs.Tab>
+                        <Tabs.Tab value="database" leftSection={<IconDatabase size={16} />}>
+                            Banco de Dados
+                        </Tabs.Tab>
                         <Tabs.Tab value="chat" leftSection={<IconBrandWhatsapp size={16} />}>
                             Chat
                         </Tabs.Tab>
@@ -255,6 +259,21 @@ export default function AdminSettings() {
                             Integrações
                         </Tabs.Tab>
                     </Tabs.List>
+
+                    {/* Database Settings */}
+                    <Tabs.Panel value="database" pt="md">
+                        {selectedCompany ? (
+                            <DatabaseSetupForm
+                                tenantId={selectedCompany.id}
+                                tenantName={selectedCompany.name}
+                                onComplete={() => refetch()}
+                            />
+                        ) : (
+                            <Alert color="yellow" title="Selecione uma empresa">
+                                Selecione uma empresa para configurar o banco de dados.
+                            </Alert>
+                        )}
+                    </Tabs.Panel>
 
                     {/* General Settings */}
                     <Tabs.Panel value="general" pt="md">

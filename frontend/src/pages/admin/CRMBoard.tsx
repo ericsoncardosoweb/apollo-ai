@@ -36,6 +36,7 @@ import {
     Checkbox,
     CopyButton,
     Code,
+    Table,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
@@ -74,6 +75,8 @@ import {
     IconWebhook,
     IconCopy,
     IconDatabase,
+    IconList,
+    IconDownload,
 } from '@tabler/icons-react'
 import { useViewContext } from '@/contexts/ViewContext'
 import { useClientDatabaseStatus, useClientSupabase } from '@/hooks/useClientSupabase'
@@ -169,6 +172,8 @@ export default function CRMBoard() {
     const [automationModalOpened, { open: openAutomationModal, close: closeAutomationModal }] = useDisclosure(false)
     const [pipelineModalOpened, { open: openPipelineModal, close: closePipelineModal }] = useDisclosure(false)
     const [addActionModalOpened, { open: openAddActionModal, close: closeAddActionModal }] = useDisclosure(false)
+    const [listModalOpened, { open: openListModal, close: closeListModal }] = useDisclosure(false)
+    const [listViewStage, setListViewStage] = useState<Stage | null>(null)
 
     // Form states
     const [newDealForm, setNewDealForm] = useState({ contact_name: '', contact_phone: '', value: 0 })
@@ -575,6 +580,46 @@ export default function CRMBoard() {
         closeAutomationModal()
     }
 
+    // Export deals to CSV
+    const exportToCSV = (dealsToExport: Deal[], filename: string, includeStage = false) => {
+        const headers = ['Nome', 'Telefone', 'Valor', 'Tags', 'Status', 'Criado em']
+        if (includeStage) headers.splice(4, 0, 'Etapa')
+
+        const rows = dealsToExport.map(deal => {
+            const stage = selectedPipeline?.stages.find(s => s.id === deal.current_stage_id)
+            const row = [
+                deal.contact_name,
+                deal.contact_phone,
+                deal.value.toString(),
+                deal.tags.join('; '),
+                deal.status,
+                new Date(deal.created_at).toLocaleDateString('pt-BR'),
+            ]
+            if (includeStage) row.splice(4, 0, stage?.name || '')
+            return row
+        })
+
+        const csvContent = [headers.join(','), ...rows.map(r => r.map(cell => `"${cell}"`).join(','))].join('\n')
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+        const link = document.createElement('a')
+        link.href = URL.createObjectURL(blob)
+        link.download = `${filename}.csv`
+        link.click()
+        notifications.show({ title: 'Exportado!', message: `${dealsToExport.length} registros exportados`, color: 'green' })
+    }
+
+    const handleExportPipeline = () => {
+        if (!selectedPipeline) return
+        const allDeals = deals.filter(d => selectedPipeline.stages.some(s => s.id === d.current_stage_id))
+        exportToCSV(allDeals, `pipeline-${selectedPipeline.name.toLowerCase().replace(/\s/g, '-')}`, true)
+    }
+
+    const handleExportStage = () => {
+        if (!listViewStage) return
+        const stageDeals = dealsByStage(listViewStage.id)
+        exportToCSV(stageDeals, `${listViewStage.name.toLowerCase().replace(/\s/g, '-')}-deals`, false)
+    }
+
     // =========================================================================
     // RENDER
     // =========================================================================
@@ -750,6 +795,11 @@ CREATE POLICY "crm_deal_history_all" ON crm_deal_history FOR ALL USING (true) WI
                     <Button leftSection={<IconPlus size={16} />} variant="filled" onClick={openNewDealModal}>
                         Novo Deal
                     </Button>
+                    <Tooltip label="Exportar Pipeline">
+                        <ActionIcon variant="light" size="lg" onClick={handleExportPipeline}>
+                            <IconDownload size={18} />
+                        </ActionIcon>
+                    </Tooltip>
                 </Group>
             </Group>
 
@@ -787,6 +837,11 @@ CREATE POLICY "crm_deal_history_all" ON crm_deal_history FOR ALL USING (true) WI
                                                 )}
                                             </Group>
                                             <Group gap={4}>
+                                                <Tooltip label="Ver Lista">
+                                                    <ActionIcon size="sm" variant="subtle" onClick={() => { setListViewStage(stage); openListModal(); }}>
+                                                        <IconList size={14} />
+                                                    </ActionIcon>
+                                                </Tooltip>
                                                 <Tooltip label="Automações">
                                                     <ActionIcon size="sm" variant="subtle" onClick={() => handleStageAutomation(stage)}>
                                                         <IconBolt size={14} />
@@ -1023,6 +1078,79 @@ CREATE POLICY "crm_deal_history_all" ON crm_deal_history FOR ALL USING (true) WI
                             </Paper>
                         )
                     })}
+                </Stack>
+            </Modal>
+
+            {/* List View Modal */}
+            <Modal
+                opened={listModalOpened}
+                onClose={closeListModal}
+                title={
+                    <Group gap="sm">
+                        <Box style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: listViewStage?.color || '#868e96' }} />
+                        <Text fw={600}>{listViewStage?.name} - Lista de Deals</Text>
+                        <Badge size="sm" variant="light">{listViewStage ? dealsByStage(listViewStage.id).length : 0}</Badge>
+                    </Group>
+                }
+                size="xl"
+            >
+                <Stack gap="md">
+                    <Group justify="space-between">
+                        <Text size="sm" c="dimmed">Total: {listViewStage ? formatCurrency(getStageTotal(listViewStage.id)) : 'R$ 0,00'}</Text>
+                        <Button size="xs" variant="light" leftSection={<IconDownload size={14} />} onClick={handleExportStage}>
+                            Exportar CSV
+                        </Button>
+                    </Group>
+
+                    <Table.ScrollContainer minWidth={500}>
+                        <Table verticalSpacing="sm" highlightOnHover striped>
+                            <Table.Thead>
+                                <Table.Tr>
+                                    <Table.Th>Nome</Table.Th>
+                                    <Table.Th>Telefone</Table.Th>
+                                    <Table.Th>Valor</Table.Th>
+                                    <Table.Th>Tags</Table.Th>
+                                    <Table.Th>Status</Table.Th>
+                                    <Table.Th>Ações</Table.Th>
+                                </Table.Tr>
+                            </Table.Thead>
+                            <Table.Tbody>
+                                {listViewStage && dealsByStage(listViewStage.id).map(deal => (
+                                    <Table.Tr key={deal.id} style={{ cursor: 'pointer' }} onClick={() => { handleDealClick(deal); closeListModal(); }}>
+                                        <Table.Td><Text size="sm" fw={500}>{deal.contact_name}</Text></Table.Td>
+                                        <Table.Td><Text size="sm" c="dimmed">{deal.contact_phone}</Text></Table.Td>
+                                        <Table.Td><Text size="sm" fw={500} c="green">{formatCurrency(deal.value)}</Text></Table.Td>
+                                        <Table.Td>
+                                            <Group gap={4}>
+                                                {deal.tags.slice(0, 2).map(tag => (
+                                                    <Badge key={tag} size="xs" variant="light">{tag}</Badge>
+                                                ))}
+                                                {deal.tags.length > 2 && <Badge size="xs" variant="outline">+{deal.tags.length - 2}</Badge>}
+                                            </Group>
+                                        </Table.Td>
+                                        <Table.Td>
+                                            <Badge size="xs" color={deal.status === 'won' ? 'green' : deal.status === 'lost' ? 'red' : 'blue'}>
+                                                {deal.status === 'won' ? 'Ganho' : deal.status === 'lost' ? 'Perdido' : 'Aberto'}
+                                            </Badge>
+                                        </Table.Td>
+                                        <Table.Td>
+                                            <Group gap={4}>
+                                                <Tooltip label="Abrir Chat">
+                                                    <ActionIcon size="sm" variant="subtle" color="green" onClick={(e) => { e.stopPropagation(); handleOpenChat(deal); }}>
+                                                        <IconBrandWhatsapp size={14} />
+                                                    </ActionIcon>
+                                                </Tooltip>
+                                            </Group>
+                                        </Table.Td>
+                                    </Table.Tr>
+                                ))}
+                            </Table.Tbody>
+                        </Table>
+                    </Table.ScrollContainer>
+
+                    {listViewStage && dealsByStage(listViewStage.id).length === 0 && (
+                        <Text ta="center" c="dimmed" py="xl">Nenhum deal nesta etapa</Text>
+                    )}
                 </Stack>
             </Modal>
         </Stack>

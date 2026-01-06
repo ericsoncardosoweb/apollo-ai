@@ -24,6 +24,11 @@ import json
 
 from app.schemas.whatsapp import BufferedMessagePacket, StandardMessage
 from app.services.rag import get_rag_service
+from app.services.prompt_security import (
+    get_prompt_security_service,
+    PromptSecurityService,
+    GuardrailsConfig
+)
 from app.db.supabase import get_supabase
 from app.core.config import settings
 
@@ -61,6 +66,18 @@ class AgentConfig:
         self.memory_window = data.get("memory_window", 10)
         self.rag_enabled = data.get("rag_enabled", False)
         self.intent_router_enabled = data.get("intent_router_enabled", True)
+        
+        # Guardrails (Security)
+        self.guardrails_enabled = data.get("guardrails_enabled", False)
+        self.guardrails_config = GuardrailsConfig(
+            enabled=self.guardrails_enabled,
+            input_prompt=data.get("guardrails_input_prompt", ""),
+            output_prompt=data.get("guardrails_output_prompt", ""),
+            blocked_patterns=data.get("guardrails_blocked_patterns"),
+            sensitive_patterns=data.get("guardrails_sensitive_patterns"),
+            block_message=data.get("guardrails_block_message", "Desculpe, não posso ajudar com esse tipo de solicitação."),
+            use_llm_validation=data.get("guardrails_use_llm", True)
+        )
 
 
 class ConversationContext:
@@ -104,6 +121,7 @@ class AIOrchestrator:
     def __init__(self):
         self._openai_client = None
         self._rag_service = None
+        self._security_service = None
     
     @property
     def openai(self):
@@ -119,6 +137,13 @@ class AIOrchestrator:
         if self._rag_service is None:
             self._rag_service = get_rag_service()
         return self._rag_service
+    
+    @property
+    def security(self) -> PromptSecurityService:
+        """Get Prompt Security service"""
+        if self._security_service is None:
+            self._security_service = get_prompt_security_service()
+        return self._security_service
     
     # ===========================================
     # MAIN PROCESSING FLOW
@@ -190,6 +215,29 @@ class AIOrchestrator:
         user_message = self._format_user_message(packet)
         context.add_message("user", user_message)
         
+        # Step 4.5: Guardrails INPUT check
+        if agent.guardrails_enabled:
+            input_check = await self.security.check_input(
+                message=user_message,
+                config=agent.guardrails_config
+            )
+            if input_check.blocked:
+                logger.warning(
+                    "Guardrails blocked user input",
+                    conversation_id=conversation["id"],
+                    reason=input_check.reason.value,
+                    pattern=input_check.matched_pattern
+                )
+                # Save blocked attempt to database
+                await self._save_messages(
+                    conversation_id=conversation["id"],
+                    tenant_id=packet.tenant_id,
+                    user_message=user_message,
+                    ai_response=agent.guardrails_config.block_message,
+                    packet=packet
+                )
+                return agent.guardrails_config.block_message
+        
         # Step 5: Detect intent (if enabled)
         intent = MessageIntent.UNKNOWN
         if agent.intent_router_enabled:
@@ -215,6 +263,22 @@ class AIOrchestrator:
             rag_context=rag_context,
             intent=intent
         )
+        
+        # Step 7.5: Guardrails OUTPUT check
+        if agent.guardrails_enabled:
+            output_check = await self.security.check_output(
+                response=response,
+                config=agent.guardrails_config
+            )
+            if output_check.blocked:
+                logger.warning(
+                    "Guardrails blocked AI output (sensitive data)",
+                    conversation_id=conversation["id"],
+                    reason=output_check.reason.value,
+                    pattern=output_check.matched_pattern
+                )
+                # Replace response with safe message
+                response = agent.guardrails_config.block_message
         
         # Step 8: Save messages to database
         await self._save_messages(

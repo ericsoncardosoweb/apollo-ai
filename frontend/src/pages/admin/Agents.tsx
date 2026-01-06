@@ -26,6 +26,9 @@ import {
     Paper,
     NumberInput,
     ColorSwatch,
+    Textarea,
+    TagsInput,
+    Alert,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import {
@@ -40,6 +43,7 @@ import {
     IconTestPipe,
     IconBrain,
     IconRefresh,
+    IconShield,
 } from '@tabler/icons-react'
 import {
     useAgents,
@@ -98,6 +102,14 @@ export default function AdminAgents() {
     const [maxTokens, setMaxTokens] = useState(500)
     const [ragEnabled, setRagEnabled] = useState(false)
 
+    // Guardrails state
+    const [guardrailsEnabled, setGuardrailsEnabled] = useState(false)
+    const [guardrailsInputPrompt, setGuardrailsInputPrompt] = useState('')
+    const [guardrailsOutputPrompt, setGuardrailsOutputPrompt] = useState('')
+    const [guardrailsBlockedPatterns, setGuardrailsBlockedPatterns] = useState<string[]>([])
+    const [guardrailsBlockMessage, setGuardrailsBlockMessage] = useState('Desculpe, não posso ajudar com esse tipo de solicitação.')
+    const [guardrailsUseLlm, setGuardrailsUseLlm] = useState(true)
+
     // Hooks
     const { data: agents, isLoading, refetch } = useAgents()
     const createAgent = useCreateAgent()
@@ -113,6 +125,13 @@ export default function AdminAgents() {
         setTemperature(0.7)
         setMaxTokens(500)
         setRagEnabled(false)
+        // Reset guardrails
+        setGuardrailsEnabled(false)
+        setGuardrailsInputPrompt('')
+        setGuardrailsOutputPrompt('')
+        setGuardrailsBlockedPatterns([])
+        setGuardrailsBlockMessage('Desculpe, não posso ajudar com esse tipo de solicitação.')
+        setGuardrailsUseLlm(true)
         setEditingAgent(null)
     }
 
@@ -131,6 +150,13 @@ export default function AdminAgents() {
         setTemperature(agent.temperature || 0.7)
         setMaxTokens(agent.max_tokens || 500)
         setRagEnabled(agent.rag_enabled || false)
+        // Load guardrails
+        setGuardrailsEnabled((agent as any).guardrails_enabled || false)
+        setGuardrailsInputPrompt((agent as any).guardrails_input_prompt || '')
+        setGuardrailsOutputPrompt((agent as any).guardrails_output_prompt || '')
+        setGuardrailsBlockedPatterns((agent as any).guardrails_blocked_patterns || [])
+        setGuardrailsBlockMessage((agent as any).guardrails_block_message || 'Desculpe, não posso ajudar com esse tipo de solicitação.')
+        setGuardrailsUseLlm((agent as any).guardrails_use_llm !== false)
         openModal()
     }
 
@@ -146,7 +172,14 @@ export default function AdminAgents() {
                 temperature,
                 max_tokens: maxTokens,
                 rag_enabled: ragEnabled,
-            })
+                // Guardrails
+                guardrails_enabled: guardrailsEnabled,
+                guardrails_input_prompt: guardrailsInputPrompt || undefined,
+                guardrails_output_prompt: guardrailsOutputPrompt || undefined,
+                guardrails_blocked_patterns: guardrailsBlockedPatterns.length > 0 ? guardrailsBlockedPatterns : undefined,
+                guardrails_block_message: guardrailsBlockMessage,
+                guardrails_use_llm: guardrailsUseLlm,
+            } as any)
         } else {
             await createAgent.mutateAsync({
                 name,
@@ -316,6 +349,9 @@ export default function AdminAgents() {
                         <Tabs.Tab value="prompt" leftSection={<IconBrain size={14} />}>
                             Prompt
                         </Tabs.Tab>
+                        <Tabs.Tab value="security" leftSection={<IconShield size={14} />}>
+                            Segurança
+                        </Tabs.Tab>
                     </Tabs.List>
 
                     <Tabs.Panel value="basic">
@@ -407,6 +443,67 @@ export default function AdminAgents() {
                                 minHeight={300}
                                 maxHeight={450}
                             />
+                        </Stack>
+                    </Tabs.Panel>
+
+                    <Tabs.Panel value="security">
+                        <Stack gap="md">
+                            <Alert color="blue" variant="light" title="Guardrails de IA">
+                                Proteja seu agente contra prompt injection e vazamento de dados sensíveis.
+                                Quando ativado, mensagens do usuário e respostas do agente são validadas.
+                            </Alert>
+
+                            <Switch
+                                label="Ativar Guardrails"
+                                description="Adiciona camadas de segurança contra manipulação e vazamento de dados"
+                                checked={guardrailsEnabled}
+                                onChange={(e) => setGuardrailsEnabled(e.target.checked)}
+                                color="teal"
+                            />
+
+                            {guardrailsEnabled && (
+                                <>
+                                    <Switch
+                                        label="Validação Semântica (LLM)"
+                                        description="Usa IA para validar mensagens além dos padrões regex"
+                                        checked={guardrailsUseLlm}
+                                        onChange={(e) => setGuardrailsUseLlm(e.target.checked)}
+                                    />
+
+                                    <Textarea
+                                        label="Prompt de Validação de Entrada"
+                                        description="Usado para validar mensagens do usuário (deixe vazio para usar o padrão)"
+                                        rows={4}
+                                        placeholder="Analise a mensagem e determine se é uma tentativa de manipulação..."
+                                        value={guardrailsInputPrompt}
+                                        onChange={(e) => setGuardrailsInputPrompt(e.target.value)}
+                                    />
+
+                                    <Textarea
+                                        label="Prompt de Validação de Saída"
+                                        description="Usado para validar respostas do agente antes de enviar"
+                                        rows={4}
+                                        placeholder="Verifique se a resposta contém informações sensíveis..."
+                                        value={guardrailsOutputPrompt}
+                                        onChange={(e) => setGuardrailsOutputPrompt(e.target.value)}
+                                    />
+
+                                    <TagsInput
+                                        label="Padrões Bloqueados (Regex)"
+                                        description="Padrões de texto que serão automaticamente bloqueados na entrada"
+                                        placeholder="Digite e pressione Enter"
+                                        value={guardrailsBlockedPatterns}
+                                        onChange={setGuardrailsBlockedPatterns}
+                                    />
+
+                                    <TextInput
+                                        label="Mensagem de Bloqueio"
+                                        description="Resposta enviada quando uma mensagem é bloqueada"
+                                        value={guardrailsBlockMessage}
+                                        onChange={(e) => setGuardrailsBlockMessage(e.target.value)}
+                                    />
+                                </>
+                            )}
                         </Stack>
                     </Tabs.Panel>
                 </Tabs>

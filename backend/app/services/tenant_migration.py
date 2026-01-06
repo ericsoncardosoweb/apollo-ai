@@ -12,7 +12,7 @@ from app.db.supabase import get_supabase
 logger = structlog.get_logger()
 
 # Current migration version
-CURRENT_MIGRATION_VERSION = 4
+CURRENT_MIGRATION_VERSION = 5
 
 # Migration SQL (version -> SQL)
 MIGRATIONS = {
@@ -421,6 +421,50 @@ CREATE POLICY "template_contents_all" ON template_contents FOR ALL USING (true) 
 CREATE POLICY "campaigns_all" ON campaigns FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "campaign_templates_all" ON campaign_templates FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "campaign_deliveries_all" ON campaign_deliveries FOR ALL USING (true) WITH CHECK (true);
+""",
+    # Version 4 -> 5: AI Guardrails Security Layer
+    4: """
+-- ===========================================
+-- AI Guardrails Security Layer
+-- ===========================================
+
+-- Enable guardrails protection (checkbox in UI)
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS guardrails_enabled BOOLEAN DEFAULT false;
+
+-- Custom prompts for validation
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS guardrails_input_prompt TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS guardrails_output_prompt TEXT;
+
+-- Regex patterns to block (prompt injection)
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS guardrails_blocked_patterns TEXT[] DEFAULT ARRAY[
+    'ignore.*previous.*instructions?',
+    'forget.*everything',
+    'you are now',
+    'pretend to be',
+    'jailbreak',
+    'DAN mode',
+    'reveal.*prompt',
+    'show.*system.*prompt'
+];
+
+-- Regex patterns for sensitive data
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS guardrails_sensitive_patterns TEXT[] DEFAULT ARRAY[
+    'custo real',
+    'margem de lucro',
+    'markup',
+    'senha',
+    'api key',
+    'credenciais'
+];
+
+-- Message shown when blocked
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS guardrails_block_message TEXT DEFAULT 'Desculpe, não posso ajudar com esse tipo de solicitação.';
+
+-- Use LLM for semantic validation
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS guardrails_use_llm BOOLEAN DEFAULT true;
+
+-- Index
+CREATE INDEX IF NOT EXISTS idx_agents_guardrails ON agents(guardrails_enabled) WHERE guardrails_enabled = true;
 """
 }
 
