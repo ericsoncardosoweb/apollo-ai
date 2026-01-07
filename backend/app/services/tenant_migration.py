@@ -12,7 +12,7 @@ from app.db.supabase import get_supabase
 logger = structlog.get_logger()
 
 # Current migration version
-CURRENT_MIGRATION_VERSION = 5
+CURRENT_MIGRATION_VERSION = 6
 
 # Migration SQL (version -> SQL)
 MIGRATIONS = {
@@ -465,6 +465,156 @@ ALTER TABLE agents ADD COLUMN IF NOT EXISTS guardrails_use_llm BOOLEAN DEFAULT t
 
 -- Index
 CREATE INDEX IF NOT EXISTS idx_agents_guardrails ON agents(guardrails_enabled) WHERE guardrails_enabled = true;
+""",
+    # Version 5 -> 6: Agent Builder IDE
+    5: """
+-- ===========================================
+-- Agent Builder IDE - Complete Schema
+-- ===========================================
+
+-- Support Router/Specialist architecture
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_type TEXT DEFAULT 'specialist';
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS intents TEXT[] DEFAULT '{}';
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS allowed_tools TEXT[] DEFAULT '{}';
+
+-- Prompt Versions (Git-like history)
+CREATE TABLE IF NOT EXISTS agent_prompt_versions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    system_prompt TEXT NOT NULL,
+    change_description TEXT,
+    created_by UUID,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    is_active BOOLEAN DEFAULT false,
+    performance_score DECIMAL(5,2),
+    tokens_count INTEGER,
+    UNIQUE(agent_id, version)
+);
+
+-- CRM Field Registry (for autocomplete)
+CREATE TABLE IF NOT EXISTS crm_field_registry (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID,
+    field_path TEXT NOT NULL,
+    field_type TEXT NOT NULL DEFAULT 'string',
+    source_table TEXT NOT NULL,
+    description TEXT,
+    example_value TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Test Suites
+CREATE TABLE IF NOT EXISTS agent_test_suites (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    category TEXT DEFAULT 'functional',
+    context JSONB DEFAULT '{}',
+    is_active BOOLEAN DEFAULT true,
+    pass_rate DECIMAL(5,2) DEFAULT 0,
+    last_run_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Test Cases
+CREATE TABLE IF NOT EXISTS agent_test_cases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    suite_id UUID NOT NULL REFERENCES agent_test_suites(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    messages JSONB NOT NULL DEFAULT '[]',
+    expected_tools TEXT[],
+    expected_tone TEXT,
+    context JSONB DEFAULT '{}',
+    is_active BOOLEAN DEFAULT true,
+    order_index INTEGER DEFAULT 0,
+    last_score DECIMAL(5,2),
+    last_run_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Test Runs
+CREATE TABLE IF NOT EXISTS agent_test_runs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    suite_id UUID REFERENCES agent_test_suites(id) ON DELETE SET NULL,
+    prompt_version_id UUID REFERENCES agent_prompt_versions(id) ON DELETE SET NULL,
+    status TEXT DEFAULT 'pending',
+    total_tests INTEGER DEFAULT 0,
+    passed_tests INTEGER DEFAULT 0,
+    failed_tests INTEGER DEFAULT 0,
+    average_score DECIMAL(5,2) DEFAULT 0,
+    duration_ms INTEGER,
+    triggered_by TEXT DEFAULT 'manual',
+    error_message TEXT,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Test Results
+CREATE TABLE IF NOT EXISTS agent_test_results (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id UUID NOT NULL REFERENCES agent_test_runs(id) ON DELETE CASCADE,
+    case_id UUID NOT NULL REFERENCES agent_test_cases(id) ON DELETE CASCADE,
+    status TEXT DEFAULT 'pending',
+    score DECIMAL(5,2),
+    user_input TEXT,
+    expected_response TEXT,
+    actual_response TEXT,
+    tools_called JSONB DEFAULT '[]',
+    execution_steps JSONB DEFAULT '[]',
+    guardrail_checks JSONB DEFAULT '[]',
+    duration_ms INTEGER,
+    tokens_used INTEGER,
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_prompt_versions_agent ON agent_prompt_versions(agent_id, version DESC);
+CREATE INDEX IF NOT EXISTS idx_test_suites_agent ON agent_test_suites(agent_id);
+CREATE INDEX IF NOT EXISTS idx_test_cases_suite ON agent_test_cases(suite_id, order_index);
+CREATE INDEX IF NOT EXISTS idx_test_runs_agent ON agent_test_runs(agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_test_results_run ON agent_test_results(run_id);
+
+-- RLS
+ALTER TABLE agent_prompt_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm_field_registry ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_test_suites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_test_cases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_test_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_test_results ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "prompt_versions_all" ON agent_prompt_versions;
+DROP POLICY IF EXISTS "crm_fields_all" ON crm_field_registry;
+DROP POLICY IF EXISTS "test_suites_all" ON agent_test_suites;
+DROP POLICY IF EXISTS "test_cases_all" ON agent_test_cases;
+DROP POLICY IF EXISTS "test_runs_all" ON agent_test_runs;
+DROP POLICY IF EXISTS "test_results_all" ON agent_test_results;
+
+CREATE POLICY "prompt_versions_all" ON agent_prompt_versions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "crm_fields_all" ON crm_field_registry FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "test_suites_all" ON agent_test_suites FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "test_cases_all" ON agent_test_cases FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "test_runs_all" ON agent_test_runs FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "test_results_all" ON agent_test_results FOR ALL USING (true) WITH CHECK (true);
+
+-- Default CRM fields
+INSERT INTO crm_field_registry (field_path, field_type, source_table, description, example_value) VALUES
+    ('lead.name', 'string', 'leads', 'Nome do lead', 'João Silva'),
+    ('lead.phone', 'string', 'leads', 'Telefone do lead', '11999998888'),
+    ('lead.email', 'string', 'leads', 'Email do lead', 'joao@email.com'),
+    ('deal.stage', 'string', 'deals', 'Etapa do funil', 'Qualificação'),
+    ('deal.value', 'number', 'deals', 'Valor do negócio', 'R$ 5.000'),
+    ('channel.name', 'string', 'channels', 'Nome do canal', 'WhatsApp Business'),
+    ('agent.name', 'string', 'agents', 'Nome do agente', 'Sofia')
+ON CONFLICT DO NOTHING;
 """
 }
 

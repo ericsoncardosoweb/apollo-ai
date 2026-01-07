@@ -3,6 +3,7 @@
  */
 
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
     Title,
     Text,
@@ -95,6 +96,7 @@ export default function AdminAgents() {
     // Form state
     const [name, setName] = useState('')
     const [description, setDescription] = useState('')
+    const navigate = useNavigate()
     const [systemPrompt, setSystemPrompt] = useState('')
     const [color, setColor] = useState('blue')
     const [modelName, setModelName] = useState('gpt-4o-mini')
@@ -268,7 +270,16 @@ export default function AdminAgents() {
                                                 >
                                                     Editar
                                                 </Menu.Item>
-                                                <Menu.Item leftSection={<IconTestPipe size={14} />}>
+                                                <Menu.Item
+                                                    leftSection={<IconBrain size={14} />}
+                                                    onClick={() => navigate(`/admin/agents/${agent.id}/builder`)}
+                                                >
+                                                    Prompt Builder
+                                                </Menu.Item>
+                                                <Menu.Item
+                                                    leftSection={<IconTestPipe size={14} />}
+                                                    onClick={() => navigate(`/admin/agents/${agent.id}/tests`)}
+                                                >
                                                     Testar
                                                 </Menu.Item>
                                                 <Menu.Divider />

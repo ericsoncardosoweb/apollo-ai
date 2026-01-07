@@ -31,10 +31,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [loading, setLoading] = useState(true)
 
     // Fetch user profile with role from database - with timeout to prevent infinite hang
-    const fetchProfile = useCallback(async (userId: string, userEmail: string): Promise<void> => {
+    const fetchProfile = useCallback(async (userId: string, userEmail: string, isRefresh = false): Promise<void> => {
         console.log('🔍 Fetching profile for:', userId, userEmail)
 
-        // Create a default profile fallback
+        // Store current profile to preserve on failure
+        const currentProfile = profile
+
+        // Create a default profile fallback (only used for brand new users)
         const defaultProfile: UserProfile = {
             id: userId,
             email: userEmail,
@@ -47,36 +50,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             updated_at: new Date().toISOString(),
         }
 
-        try {
-            // Race the query against a timeout to prevent infinite loading
-            const timeoutPromise = new Promise<null>((_, reject) => {
-                setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
-            })
+        const fetchWithRetry = async (attempt = 1): Promise<UserProfile | null> => {
+            try {
+                // Race the query against a timeout - increased to 15s for slow connections
+                const timeoutPromise = new Promise<null>((_, reject) => {
+                    setTimeout(() => reject(new Error('Profile fetch timeout')), 15000)
+                })
 
-            const queryPromise = supabase
-                .from('user_profiles')
-                .select('*')
-                .eq('id', userId)
-                .single()
+                const queryPromise = supabase
+                    .from('user_profiles')
+                    .select('*')
+                    .eq('id', userId)
+                    .single()
 
-            const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as Awaited<typeof queryPromise>
+                const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as Awaited<typeof queryPromise>
 
-            console.log('📊 Profile query result:', { data, error })
+                if (error) {
+                    console.warn(`⚠️ Profile query error (attempt ${attempt}):`, error.message)
+                    return null
+                }
 
-            if (error) {
-                console.warn('⚠️ Profile not found, using default:', error.message)
-                setProfile(defaultProfile)
-                return
+                return data as UserProfile
+            } catch (err) {
+                console.warn(`⚠️ Profile fetch failed (attempt ${attempt}):`, err)
+                return null
             }
+        }
 
-            console.log('✅ Profile loaded, role:', data.role)
-            setProfile(data as UserProfile)
-        } catch (err) {
-            console.error('❌ Error fetching profile (using default):', err)
-            // Set default profile on any error (including timeout)
+        // Try up to 3 times with exponential backoff
+        let fetchedProfile: UserProfile | null = null
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            fetchedProfile = await fetchWithRetry(attempt)
+            if (fetchedProfile) break
+            if (attempt < 3) {
+                await new Promise(resolve => setTimeout(resolve, attempt * 1000))
+            }
+        }
+
+        if (fetchedProfile) {
+            console.log('✅ Profile loaded, role:', fetchedProfile.role)
+            setProfile(fetchedProfile)
+        } else if (currentProfile && isRefresh) {
+            // On refresh failure, keep existing profile - DON'T lose master role!
+            console.warn('⚠️ Profile refresh failed, keeping existing profile with role:', currentProfile.role)
+            // Profile already set, no change needed
+        } else if (currentProfile && currentProfile.id === userId) {
+            // Already have profile for this user, keep it
+            console.warn('⚠️ Profile fetch failed, keeping existing role:', currentProfile.role)
+        } else {
+            // First time user or no profile - use default (new users only)
+            console.warn('⚠️ No profile found, using default for new user')
             setProfile(defaultProfile)
         }
-    }, [])
+    }, [profile])
 
     useEffect(() => {
         // Get initial session
@@ -155,7 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const refreshProfile = async () => {
         if (user) {
-            await fetchProfile(user.id, user.email || '')
+            await fetchProfile(user.id, user.email || '', true) // isRefresh=true to preserve role on failure
         }
     }
 

@@ -44,6 +44,7 @@ import {
     DatabaseStatus,
 } from '@/hooks/useTenantDatabase'
 import { CLIENT_MIGRATIONS_V1 } from '@/lib/clientMigrations'
+import MigrationList from '@/components/admin/MigrationList'
 
 interface DatabaseSetupFormProps {
     tenantId: string
@@ -320,83 +321,17 @@ export default function DatabaseSetupForm({ tenantId, tenantName, onComplete }: 
                 <Stepper.Step label="Migrações" description="Crie as tabelas">
                     <Paper withBorder p="md" mt="md" radius="md">
                         <Stack gap="md">
-                            <Text size="sm" c="dimmed">
-                                Agora vamos criar as tabelas necessárias no banco do cliente.
-                            </Text>
+                            <MigrationList
+                                currentVersion={config?.migrations_version || 0}
+                                onMigrationComplete={(newVersion) => {
+                                    // Refresh config to update version display
+                                    if (newVersion >= 10) {
+                                        setActiveStep(3)
+                                    }
+                                }}
+                            />
 
-                            <Alert color="blue" icon={<IconDatabase size={16} />}>
-                                <Text size="sm" fw={500}>Migrações que serão aplicadas:</Text>
-                                <Text size="xs" component="ul" mt="xs">
-                                    <li>Catálogo de Serviços (services_catalog)</li>
-                                    <li>Base de Conhecimento (knowledge_base)</li>
-                                    <li>Leads e Pipeline CRM</li>
-                                    <li>Conversas e Mensagens</li>
-                                </Text>
-                            </Alert>
-
-                            {config?.migrations_version && config.migrations_version > 0 ? (
-                                <Stack gap="sm">
-                                    <Alert color="green" icon={<IconCheck size={16} />}>
-                                        <Text size="sm">
-                                            Versão atual das migrações: <strong>v{config.migrations_version}</strong>
-                                        </Text>
-                                        <Text size="xs" c="dimmed">
-                                            Última atualização: {new Date(config.last_migration_at || '').toLocaleString()}
-                                        </Text>
-                                    </Alert>
-                                    <Group>
-                                        <Button
-                                            onClick={handleRunMigrations}
-                                            loading={runMigrations.isPending}
-                                            leftSection={<IconRefresh size={16} />}
-                                            variant="light"
-                                        >
-                                            Atualizar Agora
-                                        </Button>
-                                        <CopyButton value={CLIENT_MIGRATIONS_V1}>
-                                            {({ copied, copy }) => (
-                                                <Button
-                                                    variant="subtle"
-                                                    color={copied ? 'green' : 'gray'}
-                                                    leftSection={<IconCopy size={16} />}
-                                                    onClick={copy}
-                                                >
-                                                    {copied ? 'SQL Copiado!' : 'Copiar SQL'}
-                                                </Button>
-                                            )}
-                                        </CopyButton>
-                                    </Group>
-                                </Stack>
-                            ) : (
-                                <Stack gap="sm">
-                                    <Group>
-                                        <Button
-                                            onClick={handleRunMigrations}
-                                            loading={runMigrations.isPending}
-                                            leftSection={<IconRocket size={16} />}
-                                        >
-                                            Verificar Tabelas
-                                        </Button>
-                                        <CopyButton value={CLIENT_MIGRATIONS_V1}>
-                                            {({ copied, copy }) => (
-                                                <Button
-                                                    variant="light"
-                                                    color={copied ? 'green' : 'blue'}
-                                                    leftSection={<IconCopy size={16} />}
-                                                    onClick={copy}
-                                                >
-                                                    {copied ? 'SQL Copiado!' : 'Copiar SQL'}
-                                                </Button>
-                                            )}
-                                        </CopyButton>
-                                    </Group>
-                                    <Text size="xs" c="dimmed">
-                                        Cole o SQL no SQL Editor do Supabase do cliente para criar as tabelas.
-                                    </Text>
-                                </Stack>
-                            )}
-
-                            {config?.migrations_version && config.migrations_version > 0 && (
+                            {config?.migrations_version && config.migrations_version >= 10 && (
                                 <Button variant="light" onClick={() => setActiveStep(3)}>
                                     Próximo: Configurar Edge Function
                                 </Button>

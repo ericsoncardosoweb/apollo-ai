@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     auth, tenants, agents, conversations, messages, crm, tools, 
     webhooks, uploads, deals, pipelines, automations, contacts, knowledge,
-    campaigns, templates
+    campaigns, templates, agent_builder
 )
 
 router = APIRouter()
@@ -31,7 +31,11 @@ router.include_router(knowledge.router)  # /knowledge
 router.include_router(campaigns.router)  # /campaigns
 router.include_router(templates.router)  # /message-templates
 
+# Agent Builder IDE
+router.include_router(agent_builder.router)  # /agent-builder
+
 # CRM Engine V2
 router.include_router(deals.router)
 router.include_router(pipelines.router)
 router.include_router(automations.router)
+

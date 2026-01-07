@@ -11,14 +11,15 @@ import {
     Container,
     Stack,
     Center,
-    ThemeIcon,
     Alert,
     Group,
     Anchor,
     Box,
     Divider,
+    Image,
 } from '@mantine/core'
-import { IconAlertCircle, IconRocket } from '@tabler/icons-react'
+import { IconAlertCircle } from '@tabler/icons-react'
+import logoImage from '@/assets/logo/logo.png'
 
 export default function Login() {
     const [email, setEmail] = useState('')
@@ -51,21 +52,20 @@ export default function Login() {
         <Box
             style={{
                 minHeight: '100vh',
-                background: 'linear-gradient(135deg, var(--mantine-color-dark-8) 0%, var(--mantine-color-dark-9) 100%)',
+                background: 'linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%)',
             }}
         >
             <Container size={420} py={80}>
                 <Center mb={30}>
                     <Stack align="center" gap="xs">
-                        <ThemeIcon
-                            size={80}
-                            radius="xl"
-                            variant="gradient"
-                            gradient={{ from: 'indigo', to: 'violet', deg: 135 }}
-                        >
-                            <IconRocket size={40} stroke={1.5} />
-                        </ThemeIcon>
-                        <Title order={1} ta="center" mt="md">
+                        <Image
+                            src={logoImage}
+                            alt="Apollo A.I."
+                            h={80}
+                            w="auto"
+                            fit="contain"
+                        />
+                        <Title order={1} ta="center" mt="md" c="white">
                             Apollo A.I.
                         </Title>
                         <Text c="dimmed" size="sm" ta="center">
